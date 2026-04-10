@@ -20,6 +20,7 @@ const FIELDS = [
   { value: 'score', label: 'Score' },
   { value: 'additionalInfo', label: 'Notes' },
   { value: 'ratingCategory', label: 'Category' },
+  { value: 'uuid', label: 'UUID' },
 ];
 
 const TEXT_OPS = [
@@ -104,9 +105,12 @@ function matchFilter(entry, filter, categories) {
   const rawStr =
     field === 'any'
       ? [entry.restaurantName, entry.specifier, entry.location, entry.additionalInfo,
-          allCatNamesStr(entry, catMap), entry.score != null ? String(entry.score) : ''].join(' ')
+          allCatNamesStr(entry, catMap), entry.score != null ? String(entry.score) : '',
+          entry.uuid || ''].join(' ')
       : field === 'ratingCategory'
       ? allCatNamesStr(entry, catMap)   // searches ALL ancestors, not just direct parent
+      : field === 'uuid'
+      ? String(entry.uuid ?? '')
       : String(entry[field] ?? '');
 
   if (op === 'isEmpty') return !rawStr.trim();

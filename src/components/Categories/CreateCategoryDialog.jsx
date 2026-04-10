@@ -5,11 +5,46 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
 import Grid from '@mui/material/Grid';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { CategorySelect } from './CategorySelector';
 import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
+
+/** Read-only UUID field with a one-click copy-to-clipboard button. */
+function CopyableUuidField({ uuid }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard.writeText(uuid).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+  return (
+    <TextField
+      label="UUID"
+      value={uuid}
+      InputProps={{
+        readOnly: true,
+        endAdornment: (
+          <InputAdornment position="end">
+            <Tooltip title={copied ? 'Copied!' : 'Copy UUID'}>
+              <IconButton size="small" onClick={copy} edge="end">
+                <ContentCopyIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </InputAdornment>
+        ),
+      }}
+      fullWidth
+      size="small"
+      sx={{ '& .MuiInputBase-input': { fontFamily: 'monospace', fontSize: '0.72rem', color: 'text.secondary' } }}
+    />
+  );
+}
 
 const EMPTY = { name: '', ratingCategory: '', score: '', dateRated: '', additionalInfo: '' };
 
@@ -84,6 +119,12 @@ export default function CreateCategoryDialog({
         <DialogContent dividers>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
           <Grid container spacing={2}>
+            {/* UUID — read-only, shown in edit mode only */}
+            {isEditMode && editEntry?.uuid && (
+              <Grid item xs={12}>
+                <CopyableUuidField uuid={editEntry.uuid} />
+              </Grid>
+            )}
             <Grid item xs={12}>
               <TextField
                 label="Category Name"

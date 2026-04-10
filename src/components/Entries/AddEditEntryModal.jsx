@@ -6,6 +6,7 @@ import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
 import Grid from '@mui/material/Grid';
 import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Divider from '@mui/material/Divider';
@@ -15,10 +16,42 @@ import Tooltip from '@mui/material/Tooltip';
 import Box from '@mui/material/Box';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { CategorySelect } from '../Categories/CategorySelector';
 import CreateCategoryDialog from '../Categories/CreateCategoryDialog';
 import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
 import { evalAdditionalInfo, hasExpressions } from '../../utils/mathUtils';
+
+/** Read-only UUID field with a one-click copy-to-clipboard button. */
+function CopyableUuidField({ uuid }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard.writeText(uuid).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+  return (
+    <TextField
+      label="UUID"
+      value={uuid}
+      InputProps={{
+        readOnly: true,
+        endAdornment: (
+          <InputAdornment position="end">
+            <Tooltip title={copied ? 'Copied!' : 'Copy UUID'}>
+              <IconButton size="small" onClick={copy} edge="end">
+                <ContentCopyIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </InputAdornment>
+        ),
+      }}
+      fullWidth
+      size="small"
+      sx={{ '& .MuiInputBase-input': { fontFamily: 'monospace', fontSize: '0.72rem', color: 'text.secondary' } }}
+    />
+  );
+}
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -285,6 +318,13 @@ export default function AddEditEntryModal({
             {saveError && <Alert severity="error" sx={{ mb: 2 }}>{saveError}</Alert>}
 
             <Grid container spacing={2}>
+              {/* ── UUID (read-only, edit mode only) ─────────────────────── */}
+              {isEdit && entry?.uuid && (
+                <Grid item xs={12}>
+                  <CopyableUuidField uuid={entry.uuid} />
+                </Grid>
+              )}
+
               {/* ── Primary Rating ──────────────────────────────────────── */}
               <Grid item xs={12}>
                 <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 0.5 }}>

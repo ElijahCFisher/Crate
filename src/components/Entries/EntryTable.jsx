@@ -19,6 +19,8 @@ import TextField from '@mui/material/TextField';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import FilterBar from '../Filters/FilterBar';
 import { applyFilters, makeDefaultFilter } from '../Filters/FilterBuilder';
 import { formatDate } from '../../utils/dateUtils';
@@ -33,6 +35,9 @@ const COLUMNS = [
   { id: 'dateRated', label: 'Date Rated', sortable: true },
   { id: 'additionalInfo', label: 'Notes', sortable: false },
 ];
+
+// Total column count = expand cell + data columns + actions column
+const TOTAL_COLS = COLUMNS.length + 2;
 
 function ScoreBadge({ score }) {
   if (score == null) return <Typography variant="body2" color="text.disabled">—</Typography>;
@@ -75,12 +80,19 @@ export default function EntryTable({
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [pageInput, setPageInput] = useState('1');
+  const [expandedGroups, setExpandedGroups] = useState(new Set());
 
   const categoryMap = useMemo(() => {
     const m = new Map();
     for (const c of categories) m.set(c.uuid, c.restaurantName);
     return m;
   }, [categories]);
+
+  // Full map of all food entries by UUID — used to look up identical entries
+  const allEntriesMap = useMemo(
+    () => new Map(foodEntries.map((e) => [e.uuid, e])),
+    [foodEntries]
+  );
 
   const searchedEntries = useMemo(
     () => applyFilters(foodEntries, filters, categories),
@@ -103,21 +115,74 @@ export default function EntryTable({
     });
   }, [searchedEntries, order, orderBy, categoryMap]);
 
-  const totalPages = Math.max(1, Math.ceil(sortedEntries.length / rowsPerPage));
+  // ── Identicals grouping ────────────────────────────────────────────────────
+  // Entries that share UUIDs in their `identicals` arrays are merged into a
+  // single group. Only the "primary" entry appears as a standalone row; the
+  // others are revealed via the expand arrow.
+  //
+  // "others" includes ALL identicals (from allEntriesMap), not just filter-
+  // matching ones. This ensures UUID searches always expose the full group.
+  const groups = useMemo(() => {
+    const visited = new Set();
+    const result = [];
 
-  // Reset to page 0 when filters or sort change
+    for (const entry of sortedEntries) {
+      if (visited.has(entry.uuid)) continue;
+      visited.add(entry.uuid);
+
+      const others = (entry.identicals || [])
+        .map((uuid) => allEntriesMap.get(uuid))
+        .filter(Boolean);
+
+      // Mark identicals as visited so they won't appear as separate primary rows
+      for (const o of others) visited.add(o.uuid);
+
+      result.push({ primary: entry, others });
+    }
+
+    // UUID-field search priority: if the active filter is a UUID-field filter
+    // and an "other" has a better UUID match than the primary, promote it.
+    let uuidFilterValue = null;
+    for (const f of filters) {
+      if (f.field === 'uuid' && f.value?.trim()) {
+        uuidFilterValue = f.value.trim().toLowerCase();
+        break;
+      }
+    }
+    if (uuidFilterValue) {
+      for (const group of result) {
+        if (!group.others.length) continue;
+        if (!group.primary.uuid.toLowerCase().includes(uuidFilterValue)) {
+          const better = group.others.find((o) =>
+            o.uuid.toLowerCase().includes(uuidFilterValue)
+          );
+          if (better) {
+            group.others = [group.primary, ...group.others.filter((o) => o !== better)];
+            group.primary = better;
+          }
+        }
+      }
+    }
+
+    return result;
+  }, [sortedEntries, allEntriesMap, filters]);
+
+  const totalPages = Math.max(1, Math.ceil(groups.length / rowsPerPage));
+
+  // Reset page and collapse all groups when filters or sort change
   useEffect(() => {
     setPage(0);
+    setExpandedGroups(new Set());
   }, [filters, orderBy, order]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Keep pageInput in sync with page state (e.g., after filter reset or prev/next navigation)
+  // Keep pageInput in sync with page state
   useEffect(() => {
     setPageInput(String(page + 1));
   }, [page]);
 
-  const pagedEntries = useMemo(
-    () => sortedEntries.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage),
-    [sortedEntries, page, rowsPerPage]
+  const pagedGroups = useMemo(
+    () => groups.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage),
+    [groups, page, rowsPerPage]
   );
 
   function handleSort(col) {
@@ -129,9 +194,7 @@ export default function EntryTable({
     }
   }
 
-  function handlePageChange(_, newPage) {
-    setPage(newPage);
-  }
+  function handlePageChange(_, newPage) { setPage(newPage); }
 
   function handleRowsPerPageChange(e) {
     setRowsPerPage(parseInt(e.target.value, 10));
@@ -143,8 +206,84 @@ export default function EntryTable({
     if (!isNaN(n) && n >= 1 && n <= totalPages) {
       setPage(n - 1);
     } else {
-      setPageInput(String(page + 1)); // reset to current page on invalid input
+      setPageInput(String(page + 1));
     }
+  }
+
+  function toggleExpand(primaryUuid) {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(primaryUuid)) next.delete(primaryUuid);
+      else next.add(primaryUuid);
+      return next;
+    });
+  }
+
+  // ── Row renderer ─────────────────────────────────────────────────────────
+  // Used for both primary and secondary (expanded identical) rows.
+
+  function renderRow(entry, isPrimary, primaryUuid, othersCount, isExpanded) {
+    return (
+      <TableRow
+        key={entry.uuid}
+        hover
+        sx={
+          !isPrimary
+            ? { bgcolor: 'action.hover', '& td': { borderBottom: 'none' } }
+            : undefined
+        }
+      >
+        {/* Expand/collapse toggle — only on primary rows that have identicals */}
+        <TableCell sx={{ width: 36, p: 0, pl: 0.5 }}>
+          {isPrimary && othersCount > 0 ? (
+            <Tooltip
+              title={
+                isExpanded
+                  ? 'Hide identical ratings'
+                  : `Show ${othersCount} identical rating${othersCount !== 1 ? 's' : ''}`
+              }
+            >
+              <IconButton size="small" onClick={() => toggleExpand(primaryUuid)}>
+                {isExpanded
+                  ? <KeyboardArrowUpIcon fontSize="small" />
+                  : <KeyboardArrowDownIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+          ) : null}
+        </TableCell>
+
+        <TableCell>
+          {categoryMap.get(entry.ratingCategory) ? (
+            <Chip
+              label={categoryMap.get(entry.ratingCategory)}
+              size="small"
+              variant="outlined"
+              color="primary"
+            />
+          ) : (
+            <Typography variant="body2" color="text.disabled">—</Typography>
+          )}
+        </TableCell>
+        <TableCell>{entry.restaurantName || '—'}</TableCell>
+        <TableCell>{entry.specifier || '—'}</TableCell>
+        <TableCell>{entry.location || '—'}</TableCell>
+        <TableCell align="center"><ScoreBadge score={entry.score} /></TableCell>
+        <TableCell>{formatDate(entry.dateRated)}</TableCell>
+        <TableCell><NotesCell text={entry.additionalInfo} /></TableCell>
+        <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+          <Tooltip title="Edit">
+            <IconButton size="small" onClick={() => onEdit(entry)}>
+              <EditIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Delete">
+            <IconButton size="small" onClick={() => onDelete(entry)} color="error">
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </TableCell>
+      </TableRow>
+    );
   }
 
   return (
@@ -169,6 +308,8 @@ export default function EntryTable({
         <Table size="small">
           <TableHead>
             <TableRow>
+              {/* Narrow expand-toggle column */}
+              <TableCell sx={{ width: 36, p: 0 }} />
               {COLUMNS.map((col) => (
                 <TableCell key={col.id} align={col.align}>
                   {col.sortable ? (
@@ -188,9 +329,9 @@ export default function EntryTable({
             </TableRow>
           </TableHead>
           <TableBody>
-            {sortedEntries.length === 0 && !loading && (
+            {groups.length === 0 && !loading && (
               <TableRow>
-                <TableCell colSpan={COLUMNS.length + 1} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={TOTAL_COLS} align="center" sx={{ py: 4 }}>
                   <Typography variant="body2" color="text.secondary">
                     {foodEntries.length === 0
                       ? 'No entries yet. Click "Add Entry" to get started.'
@@ -199,45 +340,23 @@ export default function EntryTable({
                 </TableCell>
               </TableRow>
             )}
-            {pagedEntries.map((entry) => (
-              <TableRow key={entry.uuid} hover>
-                <TableCell>
-                  {categoryMap.get(entry.ratingCategory) ? (
-                    <Chip
-                      label={categoryMap.get(entry.ratingCategory)}
-                      size="small"
-                      variant="outlined"
-                      color="primary"
-                    />
-                  ) : (
-                    <Typography variant="body2" color="text.disabled">—</Typography>
-                  )}
-                </TableCell>
-                <TableCell>{entry.restaurantName || '—'}</TableCell>
-                <TableCell>{entry.specifier || '—'}</TableCell>
-                <TableCell>{entry.location || '—'}</TableCell>
-                <TableCell align="center"><ScoreBadge score={entry.score} /></TableCell>
-                <TableCell>{formatDate(entry.dateRated)}</TableCell>
-                <TableCell><NotesCell text={entry.additionalInfo} /></TableCell>
-                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                  <Tooltip title="Edit">
-                    <IconButton size="small" onClick={() => onEdit(entry)}>
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="Delete">
-                    <IconButton size="small" onClick={() => onDelete(entry)} color="error">
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </TableCell>
-              </TableRow>
-            ))}
+            {pagedGroups.flatMap(({ primary, others }) => {
+              const isExpanded = expandedGroups.has(primary.uuid);
+              const rows = [
+                renderRow(primary, true, primary.uuid, others.length, isExpanded),
+              ];
+              if (isExpanded) {
+                for (const secondary of others) {
+                  rows.push(renderRow(secondary, false, primary.uuid, 0, false));
+                }
+              }
+              return rows;
+            })}
           </TableBody>
         </Table>
       </TableContainer>
 
-      {/* Pagination row: page-jump input on the left, MUI pagination on the right */}
+      {/* Pagination row */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 1 }}>
           <Typography variant="body2" color="text.secondary">Page</Typography>
@@ -256,7 +375,7 @@ export default function EntryTable({
 
         <TablePagination
           component="div"
-          count={sortedEntries.length}
+          count={groups.length}
           page={page}
           onPageChange={handlePageChange}
           rowsPerPage={rowsPerPage}
