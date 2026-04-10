@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install)",
+      "Bash(npm run build)",
+      "Bash(powershell -Command \"Get-Content ''C:\\\\Users\\\\fishm\\\\Downloads\\\\\\(1\\) Food ratings - Combined.csv'' | Where-Object { \\($_ -split '',''\\)[3] -eq '''' } | Select-Object -First 30\")",
+      "Bash(powershell -Command \"\\(Get-Content ''C:\\\\Users\\\\fishm\\\\Downloads\\\\\\(1\\) Food ratings - Combined.csv''\\).Count\")",
+      "Bash(powershell -File:*)",
+      "Bash(powershell.exe -Command \"Get-Content ''C:\\\\Users\\\\fishm\\\\Downloads\\\\\\(1\\) Food ratings - Combined.csv'' | Where-Object { $_ -match ''^[^,]+,[^,]*,[^,]*,,'' } | Select-Object -First 50 | ForEach-Object { $_ }\")",
+      "Bash(powershell.exe -NoProfile -Command \"& { Get-Content ''C:\\\\Users\\\\fishm\\\\Downloads\\\\\\(1\\) Food ratings - Combined.csv'' | Where-Object { $_-match ''^[^,]+,[^,]*,[^,]*,,'' } | Select-Object -First 50 }\")",
+      "Bash(powershell.exe -NoProfile:*)",
+      "Bash(node -e \":*)",
+      "Bash(tail -5 \"C:/Users/fishm/Downloads/\\(1\\) Food ratings - Combined \\(1\\).csv\")",
+      "Bash(wc -l \"C:/Users/fishm/Downloads/\\(1\\) Food ratings - Combined \\(1\\).csv\")",
+      "Bash(powershell.exe -Command \"Import-Csv ''C:\\\\Users\\\\fishm\\\\Downloads\\\\\\(1\\) Food ratings - Combined \\(1\\).csv'' | Where-Object { $_.''Brand Name'' -eq '''' } | Select-Object -First 30 | Format-Table\")"
+    ]
+  }
+}
