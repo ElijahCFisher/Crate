@@ -1,12 +1,12 @@
-import { getAccessToken } from './authService';
+import { getGoogleAccessToken, clearGoogleAccessToken } from './googleTokenService';
 
-const DRIVE_API = 'https://www.googleapis.com/drive/v3';
+const DRIVE_API  = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 
 /**
  * Returns true if the error represents an authentication failure:
- *   - 'Not authenticated'  — token was null when the request was made
- *   - 'Drive API error 401' — Drive rejected the token (expired / revoked)
+ *   - 'Not authenticated'  — token fetch from Worker failed (session expired)
+ *   - 'Drive API error 401' — Drive rejected the token
  *   - 'Drive write failed 401' — same but from the write path
  */
 export function isAuthError(err) {
@@ -18,17 +18,48 @@ export function isAuthError(err) {
   );
 }
 
-function authHeader() {
-  const token = getAccessToken();
-  if (!token) throw new Error('Not authenticated');
-  return { Authorization: `Bearer ${token}` };
+/**
+ * Fetch wrapper that adds a Bearer token from the Worker.
+ * On 401 it clears the cached token and retries once with a forced refresh.
+ */
+async function driveFetch(url, options = {}, retry = true) {
+  let token;
+  try {
+    token = await getGoogleAccessToken();
+  } catch {
+    throw new Error('Not authenticated');
+  }
+
+  let res = await fetch(url, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (res.status === 401 && retry) {
+    clearGoogleAccessToken();
+    try {
+      token = await getGoogleAccessToken({ forceRefresh: true });
+    } catch {
+      throw new Error('Not authenticated');
+    }
+
+    res = await fetch(url, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
+  return res;
 }
 
 async function driveRequest(url, options = {}) {
-  const res = await fetch(url, {
-    ...options,
-    headers: { ...authHeader(), ...(options.headers || {}) },
-  });
+  const res = await driveFetch(url, options);
   if (!res.ok && res.status !== 412) {
     const body = await res.text().catch(() => '');
     throw new Error(`Drive API error ${res.status}: ${body}`);
@@ -38,16 +69,16 @@ async function driveRequest(url, options = {}) {
 
 export async function findOrCreateFolder(name) {
   const query = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-  const res = await driveRequest(
+  const res  = await driveRequest(
     `${DRIVE_API}/files?q=${encodeURIComponent(query)}&fields=files(id,name)&spaces=drive`
   );
   const data = await res.json();
   if (data.files && data.files.length > 0) return data.files[0].id;
 
   const createRes = await driveRequest(`${DRIVE_API}/files`, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' }),
+    body:    JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' }),
   });
   const folder = await createRes.json();
   return folder.id;
@@ -55,7 +86,7 @@ export async function findOrCreateFolder(name) {
 
 export async function findOrCreateFile(folderId, fileName) {
   const query = `name='${fileName}' and '${folderId}' in parents and trashed=false`;
-  const res = await driveRequest(
+  const res  = await driveRequest(
     `${DRIVE_API}/files?q=${encodeURIComponent(query)}&fields=files(id,name)&spaces=drive`
   );
   const data = await res.json();
@@ -75,7 +106,7 @@ export async function findOrCreateFile(folderId, fileName) {
   ].join('');
 
   const createRes = await driveRequest(`${UPLOAD_API}/files?uploadType=multipart`, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
     body,
   });
@@ -87,20 +118,16 @@ export async function findOrCreateFile(folderId, fileName) {
  * Read file content + version token from Drive.
  * Returns { content: string, etag: string }.
  *
- * Note: Drive API v3 removed the `etag` field. We use the `version` integer
- * (a strictly-increasing counter) as our concurrency token. The `If-Match`
- * HTTP header is also not accessible via CORS in browser fetch, so we do a
- * pre-write version check instead — same semantics, tiny race window.
+ * Drive API v3 doesn't expose ETag over CORS, so we use the `version` integer
+ * (a strictly-increasing counter) as our concurrency token.
  */
 export async function readFile(fileId) {
-  // Fetch metadata and content in parallel
   const [metaRes, contentRes] = await Promise.all([
     driveRequest(`${DRIVE_API}/files/${fileId}?fields=id,version`),
     driveRequest(`${DRIVE_API}/files/${fileId}?alt=media`),
   ]);
-  const meta = await metaRes.json();
+  const meta    = await metaRes.json();
   const content = await contentRes.text();
-
   return { content, etag: String(meta.version ?? '') };
 }
 
@@ -112,13 +139,13 @@ export async function writeFile(fileId, content, expectedVersion) {
   // Pre-write version check (replicates If-Match / 412 behaviour)
   if (expectedVersion) {
     const checkRes = await driveRequest(`${DRIVE_API}/files/${fileId}?fields=id,version`);
-    const meta = await checkRes.json();
+    const meta     = await checkRes.json();
     if (String(meta.version) !== String(expectedVersion)) {
       return { ok: false, status: 412 };
     }
   }
 
-  const boundary = 'upload_boundary_xyz';
+  const boundary  = 'upload_boundary_xyz';
   const uploadBody = [
     `--${boundary}\r\n`,
     'Content-Type: application/json; charset=UTF-8\r\n\r\n',
@@ -129,14 +156,14 @@ export async function writeFile(fileId, content, expectedVersion) {
     `--${boundary}--`,
   ].join('');
 
-  const res = await fetch(`${UPLOAD_API}/files/${fileId}?uploadType=multipart&fields=id,version`, {
-    method: 'PATCH',
-    headers: {
-      ...authHeader(),
-      'Content-Type': `multipart/related; boundary=${boundary}`,
-    },
-    body: uploadBody,
-  });
+  const res = await driveFetch(
+    `${UPLOAD_API}/files/${fileId}?uploadType=multipart&fields=id,version`,
+    {
+      method:  'PATCH',
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body:    uploadBody,
+    }
+  );
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
