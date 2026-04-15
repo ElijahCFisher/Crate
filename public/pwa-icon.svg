@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="#1565C0"/>
+  <!-- Gold star (outer R=200, inner r=82, center 256,256) -->
+  <polygon
+    points="256,56 303,191 447,194 333,281 374,418 256,336 138,418 179,281 65,194 209,191"
+    fill="#FFC107"
+    stroke="#FF8F00"
+    stroke-width="8"
+    stroke-linejoin="round"
+  />
+  <!-- Fork: handle -->
+  <rect x="228" y="248" width="22" height="108" rx="11" fill="white"/>
+  <!-- Fork: tines -->
+  <rect x="214" y="176" width="8" height="64" rx="4" fill="white"/>
+  <rect x="228" y="176" width="8" height="64" rx="4" fill="white"/>
+  <rect x="242" y="176" width="8" height="64" rx="4" fill="white"/>
+  <!-- Fork: base connecting tines to handle -->
+  <rect x="214" y="232" width="36" height="20" rx="4" fill="white"/>
+</svg>

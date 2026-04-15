@@ -26,7 +26,12 @@ async function driveFetch(url, options = {}, retry = true) {
   let token;
   try {
     token = await getGoogleAccessToken();
-  } catch {
+  } catch (err) {
+    // Preserve TypeErrors (network failures) so callers can distinguish
+    // "device is offline" from "session expired". Wrapping a TypeError as a
+    // plain Error here would cause isNetworkError() to return false, silently
+    // dropping queued offline operations instead of re-trying them later.
+    if (err instanceof TypeError) throw err;
     throw new Error('Not authenticated');
   }
 
@@ -42,7 +47,8 @@ async function driveFetch(url, options = {}, retry = true) {
     clearGoogleAccessToken();
     try {
       token = await getGoogleAccessToken({ forceRefresh: true });
-    } catch {
+    } catch (err) {
+      if (err instanceof TypeError) throw err;
       throw new Error('Not authenticated');
     }
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useGoogleLogin } from '@react-oauth/google';
 import { API_BASE, GOOGLE_AUTH_SCOPE } from '../config';
 import { clearGoogleAccessToken } from '../services/googleTokenService';
@@ -28,24 +28,47 @@ export function useAuth() {
   const [isSigningIn,    setIsSigningIn]       = useState(false);
   const [authError,      setAuthError]         = useState(null);
 
+  // Prevents concurrent silent session checks (mount + online event racing).
+  const silentCheckInProgress = useRef(false);
+
+  // Runs a silent session check; sets authenticated/loading state accordingly.
+  // Returns true if the session is still valid.
+  const checkSession = useCallback(async () => {
+    if (silentCheckInProgress.current) return false;
+    silentCheckInProgress.current = true;
+    setIsSilentTrying(true);
+    try {
+      await workerFetch('/api/session', { method: 'GET' });
+      clearGoogleAccessToken(); // will be lazily re-fetched on first Drive call
+      setIsAuthenticated(true);
+      setAuthError(null);
+      return true;
+    } catch {
+      clearGoogleAccessToken();
+      setIsAuthenticated(false);
+      return false;
+    } finally {
+      silentCheckInProgress.current = false;
+      setIsSilentTrying(false);
+    }
+  }, []);
+
   // On mount: ask the Worker if we have a valid session cookie.
   useEffect(() => {
-    let cancelled = false;
+    checkSession();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    (async () => {
-      try {
-        await workerFetch('/api/session', { method: 'GET' });
-        if (!cancelled) setIsAuthenticated(true);
-      } catch {
-        clearGoogleAccessToken();
-        if (!cancelled) setIsAuthenticated(false);
-      } finally {
-        if (!cancelled) setIsSilentTrying(false);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, []);
+  // When the device comes back online and we're not authenticated, re-check
+  // whether the session cookie is still valid (it usually is — the user just
+  // lost connectivity briefly).  This avoids showing the red ! button and
+  // forcing a manual re-login unnecessarily.
+  useEffect(() => {
+    function handleOnline() {
+      if (!isAuthenticated) checkSession();
+    }
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [isAuthenticated, checkSession]);
 
   // Auth-code popup flow — the Worker exchanges the code for tokens.
   const login = useGoogleLogin({

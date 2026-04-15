@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import Box from '@mui/material/Box';
 import Container from '@mui/material/Container';
-import Backdrop from '@mui/material/Backdrop';
-import CircularProgress from '@mui/material/CircularProgress';
-import Typography from '@mui/material/Typography';
+import LinearProgress from '@mui/material/LinearProgress';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import Header from './Header';
@@ -55,9 +53,6 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     setEditingEntry(null);
   }
 
-  /**
-   * Called by AddEditEntryModal on submit.
-   */
   function handleSave(payload) {
     if (editingEntry) {
       modifyEntry(editingEntry.uuid, payload);
@@ -66,17 +61,10 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     }
   }
 
-  /**
-   * Called by CreateCategoryDialog (add mode) or CategoriesPanel add.
-   * Returns entry synchronously so the form can immediately select the new UUID.
-   */
   function handleAddCategory(categoryData) {
     return addCategory(categoryData);
   }
 
-  /**
-   * Called by CategoriesPanel edit. Computes diff and fires modifyEntry.
-   */
   function handleEditCategory(editEntry, formData) {
     const updates = {};
     if ((formData.name || '') !== (editEntry.restaurantName || ''))
@@ -101,15 +89,23 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <Header
+        isAuthenticated={auth.isAuthenticated}
+        isSilentTrying={auth.isSilentTrying}
+        isSigningIn={auth.isSigningIn}
+        authError={auth.authError}
+        onSignIn={auth.signIn}
+        onSignOut={auth.signOut}
         syncing={syncing}
         syncError={syncError}
         onClearError={() => setSyncError(null)}
         onReauthenticate={onReauthenticate}
         onOpenExportImport={() => setExportImportOpen(true)}
-        onSignOut={auth.signOut}
         isOffline={isOffline}
         pendingCount={pendingCount}
       />
+
+      {/* Non-blocking thin progress bar while fetching Drive data */}
+      {loading && <LinearProgress sx={{ height: 2 }} />}
 
       <Container maxWidth="xl" sx={{ py: 3, flex: 1 }}>
         {/* Tab switcher */}
@@ -160,7 +156,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         onClose={closeAddEdit}
       />
 
-      {/* Delete confirm (for food entries) */}
+      {/* Delete confirm */}
       <DeleteConfirmDialog
         open={!!deleteDialogEntry}
         entry={deleteDialogEntry}
@@ -177,14 +173,6 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         onImportCsv={importCsv}
         syncing={syncing}
       />
-
-      {/* Full-screen loading overlay on initial load */}
-      <Backdrop open={loading} sx={{ zIndex: (theme) => theme.zIndex.modal + 1 }}>
-        <Box sx={{ textAlign: 'center', color: 'white' }}>
-          <CircularProgress color="inherit" sx={{ mb: 2 }} />
-          <Typography>Loading your data from Google Drive…</Typography>
-        </Box>
-      </Backdrop>
     </Box>
   );
 }

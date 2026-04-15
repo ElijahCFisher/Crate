@@ -4,7 +4,12 @@ import * as driveService from '../services/driveService';
 import * as csvService from '../services/csvService';
 import * as dataService from '../services/dataService';
 import { detectImportFormat, importFromLegacyCsv } from '../utils/importUtils';
-import { computeCategories } from '../utils/changelogUtils';
+import {
+  computeCategories,
+  createAdditionChange,
+  createModificationChange,
+  createDeletionChange,
+} from '../utils/changelogUtils';
 import { DRIVE_FOLDER_NAME, DRIVE_FILE_NAME } from '../config';
 
 // ── Offline persistence helpers ───────────────────────────────────────────────
@@ -43,9 +48,16 @@ export function useData(isAuthenticated) {
   const fileIdRef    = useRef(fileId);
   const combinedRef  = useRef(combined);
   const changelogRef = useRef(changelog);
-  useEffect(() => { fileIdRef.current   = fileId;    }, [fileId]);
+  // isOfflineRef mirrors isOffline so stale useCallback closures always read
+  // the current value (avoids trying a Drive call when we know we're offline).
+  const isOfflineRef = useRef(!navigator.onLine);
+  // Stores the latest init function so the online-event handler can call it
+  // if the page was loaded while offline (fileId was never set).
+  const initRef      = useRef(null);
+  useEffect(() => { fileIdRef.current    = fileId;    }, [fileId]);
   useEffect(() => { combinedRef.current  = combined;  }, [combined]);
   useEffect(() => { changelogRef.current = changelog; }, [changelog]);
+  useEffect(() => { isOfflineRef.current = isOffline; }, [isOffline]);
 
   // ── Apply Drive result to local state ───────────────────────────────────────
 
@@ -59,18 +71,56 @@ export function useData(isAuthenticated) {
 
   useEffect(() => {
     if (!isAuthenticated) {
-      setCombined(new Map()); setChangelog([]); setFileId(null);
+      // Show cached data so the table is populated before the user signs in.
+      const cached = loadCache();
+      setCombined(cached ? new Map(cached.combined) : new Map());
+      setChangelog(cached ? [...cached.changelog] : []);
+      setFileId(null);
+      fileIdRef.current = null;
       return;
     }
 
     async function init() {
+      initRef.current = init; // keep ref fresh for the online-event handler
       setLoading(true); setSyncError(null);
       try {
         const folderId = await driveService.findOrCreateFolder(DRIVE_FOLDER_NAME);
         const id       = await driveService.findOrCreateFile(folderId, DRIVE_FILE_NAME);
         setFileId(id); fileIdRef.current = id;
-        const { content } = await driveService.readFile(id);
+        const { content, etag } = await driveService.readFile(id);
         const data = csvService.parse(content);
+
+        // ── First-time sync: Drive is empty but cache has data ────────────────
+        // This happens on first sign-in, if the Drive file was deleted, or if
+        // the user had data cached before signing in (e.g. offline usage, or
+        // the app was installed fresh and they see old cached data).
+        // Rather than wiping the local display, upload the cache to Drive.
+        if (data.combined.size === 0 && data.changelog.length === 0) {
+          const cached = loadCache();
+          if (cached && cached.combined.size > 0) {
+            // Write the full cache verbatim — this preserves all historical
+            // changelog entries (changeMethod, original timestamps) exactly as
+            // they were. This handles: first sign-in, CSV deleted from Drive,
+            // or Drive file lost.
+            const writeResult = await driveService.writeFile(
+              id,
+              csvService.generate(cached),
+              etag,
+            );
+            if (!writeResult.ok) {
+              throw new Error(`Failed to seed Drive from cache (HTTP ${writeResult.status}).`);
+            }
+            applyResult(cached);
+            setIsOffline(false);
+            // The cache written to Drive already incorporates every queued op
+            // (each offline op saves the cache before enqueuing). Clear the
+            // queue so the ops aren't replayed and don't create duplicates.
+            saveQueue([]);
+            setPendingCount(0);
+            return;
+          }
+        }
+
         applyResult(data);
         setIsOffline(false);
         // Flush any queued ops from a previous offline session
@@ -100,7 +150,14 @@ export function useData(isAuthenticated) {
       setIsOffline(false);
       setSyncError(null);
       const id = fileIdRef.current;
-      if (id) flushQueue(id);
+      if (id) {
+        // fileId already set — went offline mid-session, just flush the queue.
+        flushQueue(id);
+      } else if (initRef.current) {
+        // Page was loaded while offline; init() never got a fileId.
+        // Re-run init now — it will load Drive data and flush the queue.
+        initRef.current();
+      }
     }
     function handleOffline() { setIsOffline(true); }
     window.addEventListener('online',  handleOnline);
@@ -190,11 +247,20 @@ export function useData(isAuthenticated) {
   // Fire-and-forget Drive sync. The caller has ALREADY applied the change
   // to local state before calling this. Returns immediately; Drive sync
   // result (or error) is reflected via `syncing` / `syncError` in the header.
+  //
+  // `newCombined` — the post-update combined Map computed synchronously by the
+  // caller (inside the setCombined updater). Passing it here ensures the cache
+  // is saved with the correct state even before React has committed the render
+  // and the combinedRef useEffect has run.
 
-  function withSyncBackground(fn, queueOp) {
-    saveCache({ combined: combinedRef.current, changelog: changelogRef.current });
+  function withSyncBackground(fn, queueOp, newCombined, newChangelog) {
+    // Use the explicitly supplied values (post-op) when available so the cache
+    // is saved with the correct state before React commits the render.
+    const mapToCache = newCombined  || combinedRef.current;
+    const logToCache = newChangelog || changelogRef.current;
+    saveCache({ combined: mapToCache, changelog: logToCache });
 
-    if (!navigator.onLine || isOffline) {
+    if (!navigator.onLine || isOfflineRef.current) {
       if (queueOp) {
         enqueue(queueOp);
         setPendingCount((n) => n + 1);
@@ -204,7 +270,13 @@ export function useData(isAuthenticated) {
 
     const id = fileIdRef.current;
     if (!id) {
-      setSyncError('No file loaded — change only saved locally.');
+      // No Drive file yet — user isn't signed in, or init() hasn't completed.
+      // Enqueue the op so it syncs automatically once we have a file ID
+      // (i.e. after sign-in finishes and init() runs flushQueue).
+      if (queueOp) {
+        enqueue(queueOp);
+        setPendingCount((n) => n + 1);
+      }
       return;
     }
 
@@ -264,17 +336,32 @@ export function useData(isAuthenticated) {
       entries.forEach((e, i) => { e.identicals = uuids.filter((_, j) => j !== i); });
     }
 
-    // Apply locally immediately
+    // Mirror what dataService does: create change objects so the local changelog
+    // is complete (correct notes, timestamps) even before the Drive sync runs.
+    const changes = entries.map((e) => createAdditionChange(e));
+
+    // Compute newChangelog explicitly from the ref BEFORE calling setState.
+    // React only eagerly evaluates the *first* setState updater in a batch;
+    // subsequent updaters run deferred, so capturing values inside them is
+    // unreliable. Using the ref guarantees newChangelog is always defined.
+    const newChangelog = [...changelogRef.current, ...changes];
+
+    // Apply locally immediately; capture post-op combined for cache consistency
+    let newCombined;
     setCombined((prev) => {
       const next = new Map(prev);
       entries.forEach((e) => next.set(e.uuid, e));
+      newCombined = next;
       return next;
     });
+    setChangelog((prev) => [...prev, ...changes]);
 
     // Background Drive sync
     withSyncBackground(
       (id) => dataService.addEntry(id, entries),
-      { type: 'add', entries }
+      { type: 'add', entries },
+      newCombined,
+      newChangelog,
     );
   }, []);
 
@@ -298,14 +385,23 @@ export function useData(isAuthenticated) {
       location: '',
       categories: computeCategories(categoryData.ratingCategory || '', currentCombined),
     };
+    const change = createAdditionChange(entry);
+    const newChangelog = [...changelogRef.current, change];
 
-    // Apply locally immediately
-    setCombined((prev) => new Map([...prev, [entry.uuid, entry]]));
+    let newCombined;
+    setCombined((prev) => {
+      const next = new Map([...prev, [entry.uuid, entry]]);
+      newCombined = next;
+      return next;
+    });
+    setChangelog((prev) => [...prev, change]);
 
     // Background Drive sync
     withSyncBackground(
       (id) => dataService.addCategory(id, { ...categoryData, uuid: entry.uuid }),
-      { type: 'addCategory', categoryData: { ...categoryData, uuid: entry.uuid } }
+      { type: 'addCategory', categoryData: { ...categoryData, uuid: entry.uuid } },
+      newCombined,
+      newChangelog,
     );
 
     return entry; // synchronous return so CreateCategoryDialog gets UUID immediately
@@ -315,18 +411,29 @@ export function useData(isAuthenticated) {
    * Modify an entry. Applies locally immediately and syncs in the background.
    */
   const modifyEntry = useCallback((uuid, updates) => {
-    // Apply locally immediately
+    const now = Date.now();
+    const changes = Object.entries(updates).map(([field, value]) =>
+      createModificationChange(uuid, field, String(value ?? ''))
+    );
+    changes.forEach((c, i) => { c.dateOfChange = now + i; });
+    const newChangelog = [...changelogRef.current, ...changes];
+
+    let newCombined;
     setCombined((prev) => {
       const next = new Map(prev);
       const e = next.get(uuid);
       if (e) next.set(uuid, { ...e, ...updates });
+      newCombined = next;
       return next;
     });
+    setChangelog((prev) => [...prev, ...changes]);
 
     // Background Drive sync
     withSyncBackground(
       (id) => dataService.modifyEntry(id, uuid, updates),
-      { type: 'modify', uuid, updates }
+      { type: 'modify', uuid, updates },
+      newCombined,
+      newChangelog,
     );
   }, []);
 
@@ -334,13 +441,24 @@ export function useData(isAuthenticated) {
    * Delete an entry. Applies locally immediately and syncs in the background.
    */
   const deleteEntry = useCallback((uuid) => {
-    // Apply locally immediately
-    setCombined((prev) => { const n = new Map(prev); n.delete(uuid); return n; });
+    const change = createDeletionChange(uuid);
+    const newChangelog = [...changelogRef.current, change];
+
+    let newCombined;
+    setCombined((prev) => {
+      const n = new Map(prev);
+      n.delete(uuid);
+      newCombined = n;
+      return n;
+    });
+    setChangelog((prev) => [...prev, change]);
 
     // Background Drive sync
     withSyncBackground(
       (id) => dataService.deleteEntry(id, uuid),
-      { type: 'delete', uuid }
+      { type: 'delete', uuid },
+      newCombined,
+      newChangelog,
     );
   }, []);
 
