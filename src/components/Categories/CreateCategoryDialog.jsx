@@ -99,7 +99,7 @@ export default function CreateCategoryDialog({
       const entry = await onSave({
         name: form.name.trim(),
         ratingCategory: form.ratingCategory,
-        score: form.score !== '' ? parseFloat(form.score) : null,
+        score: form.score !== '' ? form.score : null,
         // Use actual timestamp if user didn't change the date; midnight if they did.
         dateRated: form.dateRatedMs ?? dateInputToMs(form.dateRated),
         additionalInfo: form.additionalInfo,
@@ -144,8 +144,6 @@ export default function CreateCategoryDialog({
             <Grid item xs={6}>
               <TextField
                 label="Score"
-                type="number"
-                inputProps={{ step: 0.1, min: 0, max: 10 }}
                 value={form.score}
                 onChange={(e) => set('score', e.target.value)}
                 fullWidth size="small"

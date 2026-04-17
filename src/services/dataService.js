@@ -18,7 +18,7 @@ const SYNC_TIMEOUT_MS = 30_000;
 function parseFieldValue(fieldName, value) {
   switch (fieldName) {
     case 'score':
-      return value !== '' && value != null ? parseFloat(value) : null;
+      return value !== '' && value != null ? value : null;
     case 'dateRated':
       return value !== '' && value != null ? parseInt(value, 10) : null;
     case 'identicals':

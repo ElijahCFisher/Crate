@@ -106,9 +106,10 @@ function computeDiff(original, formShared, primaryRating) {
   const orc = original.ratingCategory || '';
   if (frc !== orc) updates.ratingCategory = frc;
 
-  // score (float or null)
-  const fScore = primaryRating.score !== '' ? parseFloat(primaryRating.score) : null;
-  if (fScore !== original.score) updates.score = fScore;
+  // score (string or null; original.score may be a legacy number in memory)
+  const fScore = primaryRating.score !== '' ? primaryRating.score : null;
+  const origScore = original.score != null ? String(original.score) : null;
+  if (fScore !== origScore) updates.score = fScore;
 
   // dateRated (compare as date strings to avoid sub-day timestamp drift)
   const fDateStr = formShared.dateRated;
@@ -240,7 +241,7 @@ export default function AddEditEntryModal({
         additionalInfo: form.additionalInfo,
         picture: form.picture,
         ratingCategory: form.primaryRating.ratingCategory,
-        score: form.primaryRating.score !== '' ? parseFloat(form.primaryRating.score) : null,
+        score: form.primaryRating.score !== '' ? form.primaryRating.score : null,
       };
       // Each additional rating has its own full set of fields
       const additionalEntries = form.additionalRatings.map((r) => ({
@@ -251,7 +252,7 @@ export default function AddEditEntryModal({
         additionalInfo: r.additionalInfo,
         picture: r.picture,
         ratingCategory: r.ratingCategory,
-        score: r.score !== '' ? parseFloat(r.score) : null,
+        score: r.score !== '' ? r.score : null,
       }));
       onSave([primaryEntry, ...additionalEntries]);
     }
@@ -343,8 +344,6 @@ export default function AddEditEntryModal({
               <Grid item xs={12} sm={3}>
                 <TextField
                   label="Score"
-                  type="number"
-                  inputProps={{ step: 0.1, min: 0, max: 10 }}
                   value={form.primaryRating.score}
                   onChange={(e) => setPrimary('score', e.target.value)}
                   fullWidth size="small"
@@ -395,8 +394,6 @@ export default function AddEditEntryModal({
                   <Grid item xs={12} sm={4}>
                     <TextField
                       label="Score"
-                      type="number"
-                      inputProps={{ step: 0.1, min: 0, max: 10 }}
                       value={r.score}
                       onChange={(e) => setAdditional(idx, 'score', e.target.value)}
                       fullWidth size="small"

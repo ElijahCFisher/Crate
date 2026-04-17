@@ -71,8 +71,9 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
       updates.restaurantName = formData.name || '';
     if ((formData.ratingCategory || '') !== (editEntry.ratingCategory || ''))
       updates.ratingCategory = formData.ratingCategory || '';
-    const newScore = formData.score != null ? formData.score : null;
-    if (newScore !== editEntry.score) updates.score = newScore;
+    const newScore = formData.score != null && formData.score !== '' ? formData.score : null;
+    const origScore = editEntry.score != null ? String(editEntry.score) : null;
+    if (newScore !== origScore) updates.score = newScore;
     const newDate = formData.dateRated ?? null;
     if (newDate !== editEntry.dateRated) updates.dateRated = newDate;
     if ((formData.additionalInfo || '') !== (editEntry.additionalInfo || ''))

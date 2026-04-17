@@ -34,7 +34,8 @@ const COLUMNS = [
 
 function ScoreBadge({ score }) {
   if (score == null) return <Typography variant="body2" color="text.disabled">—</Typography>;
-  const color = score >= 8 ? 'success' : score >= 5 ? 'warning' : 'error';
+  const num = parseFloat(score);
+  const color = !isNaN(num) ? (num >= 8 ? 'success' : num >= 5 ? 'warning' : 'error') : undefined;
   return <Chip label={score} size="small" color={color} variant="outlined" sx={{ fontWeight: 700, minWidth: 40 }} />;
 }
 

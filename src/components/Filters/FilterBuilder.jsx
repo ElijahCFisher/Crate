@@ -31,19 +31,8 @@ const TEXT_OPS = [
   { value: 'isNotEmpty', label: 'is not empty' },
 ];
 
-const NUM_OPS = [
-  { value: 'eq', label: '=' },
-  { value: 'neq', label: '≠' },
-  { value: 'lt', label: '<' },
-  { value: 'lte', label: '≤' },
-  { value: 'gt', label: '>' },
-  { value: 'gte', label: '≥' },
-  { value: 'isEmpty', label: 'is empty' },
-  { value: 'isNotEmpty', label: 'is not empty' },
-];
-
 function getOps(field) {
-  return field === 'score' ? NUM_OPS : TEXT_OPS;
+  return TEXT_OPS;
 }
 
 function needsValue(f) {
@@ -83,21 +72,6 @@ function allCatNamesStr(entry, catMap) {
 
 function matchFilter(entry, filter, categories) {
   const { field, op, value, caseSensitive, useRegex } = filter;
-
-  if (field === 'score') {
-    const raw = entry.score;
-    if (op === 'isEmpty') return raw == null;
-    if (op === 'isNotEmpty') return raw != null;
-    const num = parseFloat(value);
-    if (isNaN(num)) return true;
-    if (op === 'eq') return raw === num;
-    if (op === 'neq') return raw !== num;
-    if (op === 'lt') return raw < num;
-    if (op === 'lte') return raw <= num;
-    if (op === 'gt') return raw > num;
-    if (op === 'gte') return raw >= num;
-    return true;
-  }
 
   // Build catMap once per filter call for fast UUID → name lookup
   const catMap = new Map(categories.map((c) => [c.uuid, c.restaurantName]));
@@ -212,18 +186,8 @@ export default function FilterBuilder({ filters, onChange }) {
               error={f.useRegex && !isValidRegex(f.value)}
             />
           )}
-          {needsValue(f) && f.field === 'score' && (
-            <TextField
-              value={f.value}
-              onChange={(e) => update(f.id, { value: e.target.value })}
-              size="small"
-              type="number"
-              sx={{ width: 80 }}
-            />
-          )}
-
-          {/* Case-sensitive toggle — only for text fields */}
-          {f.field !== 'score' && needsValue(f) && (
+          {/* Case-sensitive toggle */}
+          {needsValue(f) && (
             <Tooltip title={f.caseSensitive ? 'Case sensitive (on)' : 'Case sensitive (off)'}>
               <ToggleButton
                 value="caseSensitive"
@@ -237,8 +201,8 @@ export default function FilterBuilder({ filters, onChange }) {
             </Tooltip>
           )}
 
-          {/* Regex toggle — only for text fields */}
-          {f.field !== 'score' && needsValue(f) && (
+          {/* Regex toggle */}
+          {needsValue(f) && (
             <Tooltip title={f.useRegex ? 'Regex (on)' : 'Regex (off)'}>
               <ToggleButton
                 value="useRegex"
