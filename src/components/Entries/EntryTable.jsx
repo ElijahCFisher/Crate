@@ -26,6 +26,14 @@ import { applyFilters, makeDefaultFilter } from '../Filters/FilterBuilder';
 import { formatDate } from '../../utils/dateUtils';
 import { evalAdditionalInfo } from '../../utils/mathUtils';
 
+const TABLE_PREFS_KEY = 'food_ratings_table_prefs_v1';
+function loadPrefs() {
+  try { return JSON.parse(localStorage.getItem(TABLE_PREFS_KEY) || 'null'); } catch { return null; }
+}
+function savePrefs(prefs) {
+  try { localStorage.setItem(TABLE_PREFS_KEY, JSON.stringify(prefs)); } catch {}
+}
+
 const COLUMNS = [
   { id: 'ratingCategory', label: 'Category', sortable: true },
   { id: 'restaurantName', label: 'Restaurant', sortable: true },
@@ -75,11 +83,15 @@ export default function EntryTable({
   onEdit,
   onDelete,
 }) {
-  const [filters, setFilters] = useState(() => [makeDefaultFilter()]);
-  const [order, setOrder] = useState('asc');
-  const [orderBy, setOrderBy] = useState('restaurantName');
+  const [filters, setFilters] = useState(() => loadPrefs()?.filters || [makeDefaultFilter()]);
+  const [order, setOrder] = useState(() => loadPrefs()?.order || 'asc');
+  const [orderBy, setOrderBy] = useState(() => loadPrefs()?.orderBy || 'restaurantName');
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [rowsPerPage, setRowsPerPage] = useState(() => loadPrefs()?.rowsPerPage || 20);
+
+  useEffect(() => {
+    savePrefs({ filters, order, orderBy, rowsPerPage });
+  }, [filters, order, orderBy, rowsPerPage]);
   const [pageInput, setPageInput] = useState('1');
   const [expandedGroups, setExpandedGroups] = useState(new Set());
 

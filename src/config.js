@@ -3,6 +3,7 @@ export const API_BASE = import.meta.env.VITE_API_BASE;
 
 export const DRIVE_FOLDER_NAME = 'Food Ratings';
 export const DRIVE_FILE_NAME = 'food-ratings-data.csv';
+export const SETTINGS_FILE_NAME = 'SettingsEtc.json';
 
 // Full scope string used by the auth-code login flow (includes openid + drive)
 export const GOOGLE_AUTH_SCOPE =

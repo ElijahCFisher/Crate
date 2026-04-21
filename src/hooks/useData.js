@@ -39,6 +39,7 @@ export function useData(isAuthenticated) {
   const [combined, setCombined]     = useState(new Map());
   const [changelog, setChangelog]   = useState([]);
   const [fileId, setFileId]         = useState(null);
+  const [folderId, setFolderId]     = useState(null);
   const [loading, setLoading]       = useState(false);
   const [syncing, setSyncing]       = useState(false);
   const [syncError, setSyncError]   = useState(null);
@@ -54,6 +55,9 @@ export function useData(isAuthenticated) {
   // Stores the latest init function so the online-event handler can call it
   // if the page was loaded while offline (fileId was never set).
   const initRef      = useRef(null);
+  // Serializes all background Drive writes so concurrent saves (e.g. multiple
+  // entry groups submitted at once) never race and overwrite each other.
+  const driveWriteQueueRef = useRef(Promise.resolve());
   useEffect(() => { fileIdRef.current    = fileId;    }, [fileId]);
   useEffect(() => { combinedRef.current  = combined;  }, [combined]);
   useEffect(() => { changelogRef.current = changelog; }, [changelog]);
@@ -84,8 +88,9 @@ export function useData(isAuthenticated) {
       initRef.current = init; // keep ref fresh for the online-event handler
       setLoading(true); setSyncError(null);
       try {
-        const folderId = await driveService.findOrCreateFolder(DRIVE_FOLDER_NAME);
-        const id       = await driveService.findOrCreateFile(folderId, DRIVE_FILE_NAME);
+        const resolvedFolderId = await driveService.findOrCreateFolder(DRIVE_FOLDER_NAME);
+        setFolderId(resolvedFolderId);
+        const id = await driveService.findOrCreateFile(resolvedFolderId, DRIVE_FILE_NAME);
         setFileId(id); fileIdRef.current = id;
         const { content, etag } = await driveService.readFile(id);
         const data = csvService.parse(content);
@@ -283,7 +288,11 @@ export function useData(isAuthenticated) {
     setSyncing(true);
     setSyncError(null);
 
-    fn(id)
+    // Chain onto the queue so concurrent writes are serialized — avoids the
+    // TOCTOU race where two concurrent writes both pass the version check then
+    // the last writer silently overwrites the first.
+    driveWriteQueueRef.current = driveWriteQueueRef.current
+      .then(() => fn(id))
       .then(() => {
         // Don't apply Drive result — local state is already correct.
         // Drive sync just persists. Applying would overwrite locally-added
@@ -363,6 +372,8 @@ export function useData(isAuthenticated) {
       newCombined,
       newChangelog,
     );
+
+    return entries;
   }, []);
 
   /**
@@ -493,7 +504,7 @@ export function useData(isAuthenticated) {
 
   return {
     combined, changelog, categories, foodEntries,
-    fileId, loading, syncing, syncError, setSyncError,
+    fileId, folderId, loading, syncing, syncError, setSyncError,
     isOffline, pendingCount,
     addEntry, addCategory, modifyEntry, deleteEntry,
     importCsv, exportCsv,

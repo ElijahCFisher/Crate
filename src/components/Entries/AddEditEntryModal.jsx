@@ -17,6 +17,7 @@ import Box from '@mui/material/Box';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import ReplayIcon from '@mui/icons-material/Replay';
 import { CategorySelect } from '../Categories/CategorySelector';
 import CreateCategoryDialog from '../Categories/CreateCategoryDialog';
 import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
@@ -121,12 +122,14 @@ function computeDiff(original, formShared, primaryRating) {
 
 // ── Additional-rating field helpers ──────────────────────────────────────────
 
-/** Build a fresh additional rating pre-filled from the primary form state. */
-function makeAdditionalRating(form) {
+/**
+ * Normalise the primary rating into a flat source object (same shape as
+ * additional-rating entries) so helpers below can accept either.
+ */
+function getPrimarySource(form) {
   return {
-    id: Date.now() + Math.random(),
-    ratingCategory: '',
-    score: '',
+    ratingCategory: form.primaryRating.ratingCategory,
+    score: form.primaryRating.score,
     restaurantName: form.restaurantName,
     specifier: form.specifier,
     location: form.location,
@@ -137,27 +140,168 @@ function makeAdditionalRating(form) {
   };
 }
 
+/**
+ * Build a fresh independent additional entry pre-filled from source.
+ * Copies ALL fields. NOT linked as an identical on submit (unique groupId).
+ */
+function makeAdditionalRating(source) {
+  const id = Date.now() + Math.random();
+  return {
+    id,
+    groupId: String(id),   // unique — won't be linked with anyone else on submit
+    isIdentical: false,
+    ratingCategory: source.ratingCategory ?? '',
+    score: source.score ?? '',
+    restaurantName: source.restaurantName ?? '',
+    specifier: source.specifier ?? '',
+    location: source.location ?? '',
+    dateRated: source.dateRated ?? '',
+    dateRatedMs: source.dateRatedMs ?? null,
+    additionalInfo: source.additionalInfo ?? '',
+    picture: source.picture ?? '',
+  };
+}
+
+/**
+ * Build a re-rating entry that copies ALL fields from source.
+ * Shares groupId with the source → both are submitted as identicals.
+ */
+function makeIdenticalRating(source, groupId) {
+  return {
+    id: Date.now() + Math.random(),
+    groupId,               // shared with source's group — linked on submit
+    isIdentical: true,
+    ratingCategory: source.ratingCategory ?? '',
+    score: source.score ?? '',
+    restaurantName: source.restaurantName ?? '',
+    specifier: source.specifier ?? '',
+    location: source.location ?? '',
+    dateRated: source.dateRated ?? '',
+    dateRatedMs: source.dateRatedMs ?? null,
+    additionalInfo: source.additionalInfo ?? '',
+    picture: source.picture ?? '',
+  };
+}
+
+// ── Bulk-add reconstruction helpers ───────────────────────────────────────────
+
+/**
+ * Group entries into connected components based on identicals linkage.
+ * Each component is an array of entries that are re-ratings of each other.
+ */
+function buildIdenticalGroups(entries) {
+  const byUuid = new Map(entries.map((e) => [e.uuid, e]));
+  const visited = new Set();
+  const groups = [];
+  for (const entry of entries) {
+    if (visited.has(entry.uuid)) continue;
+    const group = [];
+    const queue = [entry];
+    while (queue.length > 0) {
+      const curr = queue.shift();
+      if (visited.has(curr.uuid)) continue;
+      visited.add(curr.uuid);
+      group.push(curr);
+      for (const uid of (curr.identicals || [])) {
+        const neighbor = byUuid.get(uid);
+        if (neighbor && !visited.has(uid)) queue.push(neighbor);
+      }
+    }
+    groups.push(group);
+  }
+  return groups;
+}
+
+/**
+ * Reconstruct form state from an array of existing entry objects (bulk-add resume).
+ */
+function entriesToForm(entries) {
+  if (!entries || entries.length === 0) return entryToForm(null);
+  const groups = buildIdenticalGroups(entries);
+  const primaryEntry = groups[0][0];
+
+  const shared = {
+    restaurantName: primaryEntry.restaurantName || '',
+    specifier: primaryEntry.specifier || '',
+    location: primaryEntry.location || '',
+    dateRated: msToDateInput(primaryEntry.dateRated),
+    dateRatedMs: primaryEntry.dateRated ?? Date.now(),
+    additionalInfo: primaryEntry.additionalInfo || '',
+    picture: primaryEntry.picture || '',
+  };
+
+  const primaryRating = {
+    ratingCategory: primaryEntry.ratingCategory || '',
+    score: primaryEntry.score != null ? String(primaryEntry.score) : '',
+  };
+
+  function entryToAdditional(e, groupId, isIdentical) {
+    return {
+      id: Date.now() + Math.random(),
+      groupId,
+      isIdentical,
+      originalUuid: e.uuid,
+      ratingCategory: e.ratingCategory || '',
+      score: e.score != null ? String(e.score) : '',
+      restaurantName: e.restaurantName || '',
+      specifier: e.specifier || '',
+      location: e.location || '',
+      dateRated: msToDateInput(e.dateRated),
+      dateRatedMs: e.dateRated ?? Date.now(),
+      additionalInfo: e.additionalInfo || '',
+      picture: e.picture || '',
+    };
+  }
+
+  const additionalRatings = [];
+
+  // Primary group re-ratings
+  for (const e of groups[0].slice(1)) {
+    additionalRatings.push(entryToAdditional(e, 'primary', true));
+  }
+
+  // Other groups (from + button)
+  for (const group of groups.slice(1)) {
+    const groupId = String(Date.now() + Math.random());
+    for (let i = 0; i < group.length; i++) {
+      additionalRatings.push(entryToAdditional(group[i], groupId, i > 0));
+    }
+  }
+
+  return { ...shared, primaryRating, primaryOriginalUuid: primaryEntry.uuid, additionalRatings };
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AddEditEntryModal({
   open,
   entry,           // null for add, entry object for edit
+  initialEntries,  // array of existing entries to pre-fill (bulk-add resume)
   categories,
   onSave,          // (payload) — payload is updates object (edit) or array of entry data (add)
+  onSaveGroups,    // (groups: Array<Array<entryData>>) — all groups at once (add mode)
+  onBulkSave,      // (changes: Array<{uuid, updates}>) — edit existing entries from a bulk add
   onAddCategory,   // (categoryData) => entry
   onClose,
   loading,
   saveError,
 }) {
   const isEdit = !!entry;
+  const isBulkEdit = !!onBulkSave;
 
   const [form, setForm] = useState(entryToForm(null));
   const [pendingCategoryName, setPendingCategoryName] = useState(null);
   const [categoryDialogTarget, setCategoryDialogTarget] = useState(null);
 
   useEffect(() => {
-    if (open) setForm(entryToForm(entry));
-  }, [open, entry]);
+    if (open) {
+      if (!entry && initialEntries && initialEntries.length > 0) {
+        setForm(entriesToForm(initialEntries));
+      } else {
+        setForm(entryToForm(entry));
+      }
+    }
+  }, [open, entry, initialEntries]);
 
   function setShared(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -178,8 +322,34 @@ export default function AddEditEntryModal({
   function addAdditionalRating() {
     setForm((f) => ({
       ...f,
-      additionalRatings: [...f.additionalRatings, makeAdditionalRating(f)],
+      additionalRatings: [...f.additionalRatings, makeAdditionalRating(getPrimarySource(f))],
     }));
+  }
+
+  function addIdenticalRating() {
+    setForm((f) => ({
+      ...f,
+      additionalRatings: [...f.additionalRatings, makeIdenticalRating(getPrimarySource(f), 'primary')],
+    }));
+  }
+
+  /** Add an independent copy branching from an existing additional entry. */
+  function addAdditionalFromEntry(idx) {
+    setForm((f) => ({
+      ...f,
+      additionalRatings: [...f.additionalRatings, makeAdditionalRating(f.additionalRatings[idx])],
+    }));
+  }
+
+  /** Add a re-rating linked to an existing additional entry. */
+  function addIdenticalOfEntry(idx) {
+    setForm((f) => {
+      const src = f.additionalRatings[idx];
+      return {
+        ...f,
+        additionalRatings: [...f.additionalRatings, makeIdenticalRating(src, src.groupId)],
+      };
+    });
   }
 
   function removeAdditionalRating(idx) {
@@ -231,30 +401,68 @@ export default function AddEditEntryModal({
       const updates = computeDiff(entry, form, form.primaryRating);
       if (Object.keys(updates).length === 0) { onClose(); return; }
       onSave(updates);
+    } else if (isBulkEdit) {
+      const byUuid = new Map((initialEntries || []).map((orig) => [orig.uuid, orig]));
+      const changes = [];
+      // Primary entry diff
+      if (form.primaryOriginalUuid) {
+        const orig = byUuid.get(form.primaryOriginalUuid);
+        if (orig) {
+          const diff = computeDiff(orig, form, form.primaryRating);
+          if (Object.keys(diff).length > 0) changes.push({ uuid: form.primaryOriginalUuid, updates: diff });
+        }
+      }
+      // Additional entries diffs
+      for (const r of form.additionalRatings) {
+        if (!r.originalUuid) continue;
+        const orig = byUuid.get(r.originalUuid);
+        if (orig) {
+          const diff = computeDiff(orig, r, { ratingCategory: r.ratingCategory, score: r.score });
+          if (Object.keys(diff).length > 0) changes.push({ uuid: r.originalUuid, updates: diff });
+        }
+      }
+      if (changes.length > 0) onBulkSave(changes);
     } else {
-      // Primary entry uses top-level form fields
-      const primaryEntry = {
-        restaurantName: form.restaurantName,
-        specifier: form.specifier,
-        location: form.location,
-        dateRated: form.dateRatedMs ?? dateInputToMs(form.dateRated),
-        additionalInfo: form.additionalInfo,
-        picture: form.picture,
-        ratingCategory: form.primaryRating.ratingCategory,
-        score: form.primaryRating.score !== '' ? form.primaryRating.score : null,
-      };
-      // Each additional rating has its own full set of fields
-      const additionalEntries = form.additionalRatings.map((r) => ({
-        restaurantName: r.restaurantName,
-        specifier: r.specifier,
-        location: r.location,
-        dateRated: r.dateRatedMs ?? dateInputToMs(r.dateRated),
-        additionalInfo: r.additionalInfo,
-        picture: r.picture,
-        ratingCategory: r.ratingCategory,
-        score: r.score !== '' ? r.score : null,
-      }));
-      onSave([primaryEntry, ...additionalEntries]);
+      // Helper to convert a rating form object to a saveable entry object
+      function toEntry(r, scoreField, categoryField) {
+        return {
+          restaurantName: r.restaurantName,
+          specifier: r.specifier,
+          location: r.location,
+          dateRated: r.dateRatedMs ?? dateInputToMs(r.dateRated),
+          additionalInfo: r.additionalInfo,
+          picture: r.picture,
+          ratingCategory: categoryField,
+          score: scoreField !== '' ? scoreField : null,
+        };
+      }
+
+      const primaryEntry = toEntry(
+        form, form.primaryRating.score, form.primaryRating.ratingCategory
+      );
+
+      // Primary group: primary + all additional ratings re-linked to it (groupId === 'primary')
+      const primaryGroupExtras = form.additionalRatings
+        .filter((r) => r.groupId === 'primary')
+        .map((r) => toEntry(r, r.score, r.ratingCategory));
+
+      // Other groups: each unique groupId that isn't 'primary'
+      const otherAdditionals = form.additionalRatings.filter((r) => r.groupId !== 'primary');
+      const groupsMap = new Map();
+      for (const r of otherAdditionals) {
+        if (!groupsMap.has(r.groupId)) groupsMap.set(r.groupId, []);
+        groupsMap.get(r.groupId).push(r);
+      }
+      const otherGroups = Array.from(groupsMap.values()).map((g) =>
+        g.map((r) => toEntry(r, r.score, r.ratingCategory))
+      );
+
+      if (onSaveGroups) {
+        onSaveGroups([[primaryEntry, ...primaryGroupExtras], ...otherGroups]);
+      } else {
+        onSave([primaryEntry, ...primaryGroupExtras]);
+        for (const group of otherGroups) onSave(group);
+      }
     }
     onClose();
   }
@@ -314,7 +522,7 @@ export default function AddEditEntryModal({
     <>
       <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
         <form onSubmit={handleSubmit}>
-          <DialogTitle>{isEdit ? 'Edit Entry' : 'Add Entry'}</DialogTitle>
+          <DialogTitle>{isEdit ? 'Edit Entry' : isBulkEdit ? 'Edit Bulk Add' : 'Add Entry'}</DialogTitle>
           <DialogContent dividers>
             {saveError && <Alert severity="error" sx={{ mb: 2 }}>{saveError}</Alert>}
 
@@ -333,7 +541,7 @@ export default function AddEditEntryModal({
                 </Typography>
               </Grid>
 
-              <Grid item xs={12} sm={8}>
+              <Grid item xs={12} sm={7}>
                 <CategorySelect
                   categories={categories}
                   value={form.primaryRating.ratingCategory}
@@ -341,7 +549,7 @@ export default function AddEditEntryModal({
                   label="Rating Category"
                 />
               </Grid>
-              <Grid item xs={12} sm={3}>
+              <Grid item xs={9} sm={3}>
                 <TextField
                   label="Score"
                   value={form.primaryRating.score}
@@ -349,11 +557,16 @@ export default function AddEditEntryModal({
                   fullWidth size="small"
                 />
               </Grid>
-              {!isEdit && (
-                <Grid item xs={1} sx={{ display: 'flex', alignItems: 'center' }}>
-                  <Tooltip title="Add another rating (different category/brand/specifier)">
+              {!isEdit && !isBulkEdit && (
+                <Grid item xs={3} sm={2} sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Tooltip title="Add another item from this visit (separate entry)">
                     <IconButton size="small" onClick={addAdditionalRating} color="primary">
                       <AddIcon />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Add a re-rating of this entry (linked as identical — same item, different visit)">
+                    <IconButton size="small" onClick={addIdenticalRating} sx={{ color: 'text.secondary' }}>
+                      <ReplayIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
                 </Grid>
@@ -368,50 +581,120 @@ export default function AddEditEntryModal({
               )}
 
               {/* ── Additional ratings ───────────────────────────────── */}
-              {!isEdit && form.additionalRatings.map((r, idx) => (
-                <React.Fragment key={r.id}>
-                  <Grid item xs={12}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1 }}>
-                      <Typography variant="subtitle2" color="text.secondary">
-                        Rating {idx + 2}
-                      </Typography>
-                      <IconButton size="small" onClick={() => removeAdditionalRating(idx)} color="error">
-                        <RemoveCircleOutlineIcon fontSize="small" />
-                      </IconButton>
-                    </Box>
-                    <Divider sx={{ mt: 0.5 }} />
-                  </Grid>
+              {!isEdit && (() => {
+                // Map entry id → actual index in additionalRatings (for all handlers)
+                const idxById = new Map(form.additionalRatings.map((r, i) => [r.id, i]));
 
-                  {/* Category + Score */}
-                  <Grid item xs={12} sm={8}>
-                    <CategorySelect
-                      categories={categories}
-                      value={r.ratingCategory}
-                      onChange={makeRatingCategoryChangeHandler(`additional-${idx}`)}
-                      label="Rating Category"
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <TextField
-                      label="Score"
-                      value={r.score}
-                      onChange={(e) => setAdditional(idx, 'score', e.target.value)}
-                      fullWidth size="small"
-                    />
-                  </Grid>
+                // Collect non-primary groupIds in order of first appearance
+                const seen = new Set(['primary']);
+                const nonPrimaryGroupOrder = [];
+                for (const r of form.additionalRatings) {
+                  if (!seen.has(r.groupId)) { seen.add(r.groupId); nonPrimaryGroupOrder.push(r.groupId); }
+                }
 
-                  {/* All shared fields, editable per-additional-rating */}
-                  {renderSharedFields(
-                    r,
-                    (field, value) => setAdditional(idx, field, value),
-                    (v) => setForm((f) => {
-                      const next = [...f.additionalRatings];
-                      next[idx] = { ...next[idx], dateRated: v, dateRatedMs: dateInputToMs(v) };
-                      return { ...f, additionalRatings: next };
-                    })
-                  )}
-                </React.Fragment>
-              ))}
+                // Sequential label numbers for group leaders (Rating 2, 3, …)
+                const leaderNumber = new Map(nonPrimaryGroupOrder.map((gid, i) => [gid, i + 2]));
+
+                /**
+                 * Render one additional rating block.
+                 * indented=true → left-border accent + margin to show it belongs to the entry above.
+                 */
+                function renderAdditionalBlock(r, indented) {
+                  const idx = idxById.get(r.id);
+                  const label = r.isIdentical ? 'Re-rating' : `Rating ${leaderNumber.get(r.groupId)}`;
+
+                  const inner = (
+                    <Grid container spacing={2}>
+                      <Grid item xs={12}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            {r.isIdentical && (
+                              <Tooltip title="Re-rating: linked as identical — same item, different visit">
+                                <ReplayIcon sx={{ fontSize: '0.9rem', color: 'primary.main' }} />
+                              </Tooltip>
+                            )}
+                            <Typography variant="subtitle2" color="text.secondary">{label}</Typography>
+                          </Box>
+                          <IconButton size="small" onClick={() => removeAdditionalRating(idx)} color="error">
+                            <RemoveCircleOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                        <Divider sx={{ mt: 0.5 }} />
+                      </Grid>
+
+                      <Grid item xs={12} sm={7}>
+                        <CategorySelect
+                          categories={categories}
+                          value={r.ratingCategory}
+                          onChange={makeRatingCategoryChangeHandler(`additional-${idx}`)}
+                          label="Rating Category"
+                        />
+                      </Grid>
+                      <Grid item xs={9} sm={3}>
+                        <TextField
+                          label="Score"
+                          value={r.score}
+                          onChange={(e) => setAdditional(idx, 'score', e.target.value)}
+                          fullWidth size="small"
+                        />
+                      </Grid>
+                      {!isBulkEdit && (
+                        <Grid item xs={3} sm={2} sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Tooltip title="Add another item from this visit (separate entry)">
+                            <IconButton size="small" onClick={() => addAdditionalFromEntry(idx)} color="primary">
+                              <AddIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Add a re-rating of this entry (linked as identical — same item, different visit)">
+                            <IconButton size="small" onClick={() => addIdenticalOfEntry(idx)} sx={{ color: 'text.secondary' }}>
+                              <ReplayIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Grid>
+                      )}
+
+                      {renderSharedFields(
+                        r,
+                        (field, value) => setAdditional(idx, field, value),
+                        (v) => setForm((f) => {
+                          const next = [...f.additionalRatings];
+                          next[idx] = { ...next[idx], dateRated: v, dateRatedMs: dateInputToMs(v) };
+                          return { ...f, additionalRatings: next };
+                        })
+                      )}
+                    </Grid>
+                  );
+
+                  return (
+                    <Grid item xs={12} key={r.id}>
+                      {indented ? (
+                        <Box sx={{ ml: 3, pl: 1.5, borderLeft: '3px solid', borderColor: 'primary.main', mt: 1 }}>
+                          {inner}
+                        </Box>
+                      ) : inner}
+                    </Grid>
+                  );
+                }
+
+                // Re-ratings of primary — rendered indented directly under the primary block
+                const primaryReratings = form.additionalRatings.filter((r) => r.groupId === 'primary');
+                // Other groups: [leader, ...re-ratings], grouped by first-seen groupId order
+                const otherGroups = nonPrimaryGroupOrder.map((gid) =>
+                  form.additionalRatings.filter((r) => r.groupId === gid)
+                );
+
+                return (
+                  <>
+                    {primaryReratings.map((r) => renderAdditionalBlock(r, true))}
+                    {otherGroups.map((members) => (
+                      <React.Fragment key={members[0].groupId}>
+                        {renderAdditionalBlock(members[0], false)}
+                        {members.slice(1).map((r) => renderAdditionalBlock(r, true))}
+                      </React.Fragment>
+                    ))}
+                  </>
+                );
+              })()}
             </Grid>
           </DialogContent>
           <DialogActions>

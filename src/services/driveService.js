@@ -120,6 +120,62 @@ export async function findOrCreateFile(folderId, fileName) {
   return file.id;
 }
 
+export async function findOrCreateJsonFile(folderId, fileName, defaultContent = '{}') {
+  const query = `name='${fileName}' and '${folderId}' in parents and trashed=false`;
+  const res  = await driveRequest(
+    `${DRIVE_API}/files?q=${encodeURIComponent(query)}&fields=files(id,name)&spaces=drive`
+  );
+  const data = await res.json();
+  if (data.files && data.files.length > 0) return data.files[0].id;
+
+  const boundary = 'init_boundary_json';
+  const metadata = { name: fileName, parents: [folderId], mimeType: 'application/json' };
+  const body = [
+    `--${boundary}\r\n`,
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+    JSON.stringify(metadata) + '\r\n',
+    `--${boundary}\r\n`,
+    'Content-Type: application/json\r\n\r\n',
+    defaultContent + '\r\n',
+    `--${boundary}--`,
+  ].join('');
+
+  const createRes = await driveRequest(`${UPLOAD_API}/files?uploadType=multipart`, {
+    method:  'POST',
+    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  const file = await createRes.json();
+  return file.id;
+}
+
+export async function writeJsonFile(fileId, jsonString) {
+  const boundary = 'upload_boundary_json';
+  const uploadBody = [
+    `--${boundary}\r\n`,
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+    JSON.stringify({ mimeType: 'application/json' }) + '\r\n',
+    `--${boundary}\r\n`,
+    'Content-Type: application/json\r\n\r\n',
+    jsonString + '\r\n',
+    `--${boundary}--`,
+  ].join('');
+
+  const res = await driveFetch(
+    `${UPLOAD_API}/files/${fileId}?uploadType=multipart`,
+    {
+      method:  'PATCH',
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body:    uploadBody,
+    }
+  );
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    throw new Error(`Drive write failed ${res.status}: ${errBody}`);
+  }
+}
+
 /**
  * Read file content + version token from Drive.
  * Returns { content: string, etag: string }.

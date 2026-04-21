@@ -10,11 +10,15 @@ import AddEditEntryModal from '../Entries/AddEditEntryModal';
 import DeleteConfirmDialog from '../Entries/DeleteConfirmDialog';
 import ExportImportDialog from '../ExportImport/ExportImportDialog';
 import CategoriesPanel from '../Categories/CategoriesPanel';
+import BulkAddsPanel from '../BulkAdds/BulkAddsPanel';
+import { useSettings } from '../../hooks/useSettings';
 
 export default function AppLayout({ auth, data, onReauthenticate }) {
   const {
+    combined,
     foodEntries,
     categories,
+    folderId,
     loading,
     syncing,
     syncError,
@@ -29,28 +33,40 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     pendingCount,
   } = data;
 
+  const { bulkAdds, addBulkAdd } = useSettings(folderId);
+
   // Tab
   const [tab, setTab] = useState('entries');
 
   // Modal state
   const [addEditOpen, setAddEditOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState(null);
+  const [bulkAddEntries, setBulkAddEntries] = useState(null);
   const [deleteDialogEntry, setDeleteDialogEntry] = useState(null);
   const [exportImportOpen, setExportImportOpen] = useState(false);
 
   function openAdd() {
     setEditingEntry(null);
+    setBulkAddEntries(null);
+    setAddEditOpen(true);
+  }
+
+  function openFromBulk(entries) {
+    setEditingEntry(null);
+    setBulkAddEntries(entries);
     setAddEditOpen(true);
   }
 
   function openEdit(entry) {
     setEditingEntry(entry);
+    setBulkAddEntries(null);
     setAddEditOpen(true);
   }
 
   function closeAddEdit() {
     setAddEditOpen(false);
     setEditingEntry(null);
+    setBulkAddEntries(null);
   }
 
   function handleSave(payload) {
@@ -58,6 +74,21 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
       modifyEntry(editingEntry.uuid, payload);
     } else {
       addEntry(payload);
+    }
+  }
+
+  function handleSaveGroups(groups) {
+    const allUuids = [];
+    for (const group of groups) {
+      const entries = addEntry(group);
+      if (entries) allUuids.push(...entries.map((e) => e.uuid));
+    }
+    if (allUuids.length > 1) addBulkAdd(allUuids);
+  }
+
+  function handleBulkSave(changes) {
+    for (const { uuid, updates } of changes) {
+      modifyEntry(uuid, updates);
     }
   }
 
@@ -123,6 +154,10 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
             label={`Categories${categories.length ? ` (${categories.length})` : ''}`}
             value="categories"
           />
+          <Tab
+            label={`Bulk Adds${bulkAdds.length ? ` (${bulkAdds.length})` : ''}`}
+            value="bulkAdds"
+          />
         </Tabs>
 
         {tab === 'entries' && (
@@ -145,14 +180,25 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
             onAddCategory={handleAddCategory}
           />
         )}
+
+        {tab === 'bulkAdds' && (
+          <BulkAddsPanel
+            bulkAdds={bulkAdds}
+            combined={combined}
+            onOpen={openFromBulk}
+          />
+        )}
       </Container>
 
       {/* Add / Edit entry modal */}
       <AddEditEntryModal
         open={addEditOpen}
         entry={editingEntry}
+        initialEntries={bulkAddEntries}
         categories={categories}
         onSave={handleSave}
+        onSaveGroups={!editingEntry && !bulkAddEntries ? handleSaveGroups : undefined}
+        onBulkSave={bulkAddEntries ? handleBulkSave : undefined}
         onAddCategory={handleAddCategory}
         onClose={closeAddEdit}
       />
