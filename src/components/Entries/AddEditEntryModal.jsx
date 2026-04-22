@@ -22,6 +22,10 @@ import { CategorySelect } from '../Categories/CategorySelector';
 import CreateCategoryDialog from '../Categories/CreateCategoryDialog';
 import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
 import { evalAdditionalInfo, hasExpressions } from '../../utils/mathUtils';
+import {
+  LABEL_RESTAURANT, LABEL_FOOD_NAME, LABEL_RATING, LABEL_CATEGORY,
+  LABEL_LOCATION, LABEL_DATE, LABEL_ADDITIONAL_INFO, LABEL_PICTURE,
+} from '../../constants/fieldLabels';
 
 /** Read-only UUID field with a one-click copy-to-clipboard button. */
 function CopyableUuidField({ uuid }) {
@@ -285,23 +289,26 @@ export default function AddEditEntryModal({
   onClose,
   loading,
   saveError,
+  showAdvancedByDefault = false,
 }) {
   const isEdit = !!entry;
   const isBulkEdit = !!onBulkSave;
 
   const [form, setForm] = useState(entryToForm(null));
+  const [showAdvanced, setShowAdvanced] = useState(showAdvancedByDefault);
   const [pendingCategoryName, setPendingCategoryName] = useState(null);
   const [categoryDialogTarget, setCategoryDialogTarget] = useState(null);
 
   useEffect(() => {
     if (open) {
+      setShowAdvanced(showAdvancedByDefault);
       if (!entry && initialEntries && initialEntries.length > 0) {
         setForm(entriesToForm(initialEntries));
       } else {
         setForm(entryToForm(entry));
       }
     }
-  }, [open, entry, initialEntries]);
+  }, [open, entry, initialEntries, showAdvancedByDefault]);
 
   function setShared(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -467,36 +474,43 @@ export default function AddEditEntryModal({
     onClose();
   }
 
-  // ── Shared fields render helper ───────────────────────────────────────────
+  // ── Field render helpers ──────────────────────────────────────────────────
 
-  function renderSharedFields(values, onChange, onDateChange) {
+  function renderSimpleSharedFields(values, onChange) {
     return (
       <>
         <Grid item xs={12} sm={6}>
-          <TextField label="Restaurant Name" value={values.restaurantName}
+          <TextField label={LABEL_RESTAURANT} value={values.restaurantName}
             onChange={(e) => onChange('restaurantName', e.target.value)}
             fullWidth size="small" />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField label="Specifier" placeholder="e.g. Chocolate"
+          <TextField label={LABEL_FOOD_NAME} placeholder="e.g. Chocolate"
             value={values.specifier}
             onChange={(e) => onChange('specifier', e.target.value)}
             fullWidth size="small" />
         </Grid>
+      </>
+    );
+  }
+
+  function renderAdvancedSharedFields(values, onChange, onDateChange) {
+    return (
+      <>
         <Grid item xs={12} sm={8}>
-          <TextField label="Location" placeholder="e.g. Denver"
+          <TextField label={LABEL_LOCATION} placeholder="e.g. Denver"
             value={values.location}
             onChange={(e) => onChange('location', e.target.value)}
             fullWidth size="small" />
         </Grid>
         <Grid item xs={12} sm={4}>
-          <TextField label="Date Rated" type="date"
+          <TextField label={LABEL_DATE} type="date"
             value={values.dateRated}
             onChange={(e) => onDateChange(e.target.value)}
             fullWidth size="small" InputLabelProps={{ shrink: true }} />
         </Grid>
         <Grid item xs={12}>
-          <TextField label="Additional Information"
+          <TextField label={LABEL_ADDITIONAL_INFO}
             value={values.additionalInfo}
             onChange={(e) => onChange('additionalInfo', e.target.value)}
             fullWidth multiline rows={2} size="small" />
@@ -507,7 +521,7 @@ export default function AddEditEntryModal({
           )}
         </Grid>
         <Grid item xs={12}>
-          <TextField label="Picture URL"
+          <TextField label={LABEL_PICTURE}
             value={values.picture}
             onChange={(e) => onChange('picture', e.target.value)}
             fullWidth size="small" />
@@ -541,22 +555,33 @@ export default function AddEditEntryModal({
                 </Typography>
               </Grid>
 
-              <Grid item xs={12} sm={7}>
-                <CategorySelect
-                  categories={categories}
-                  value={form.primaryRating.ratingCategory}
-                  onChange={makeRatingCategoryChangeHandler('primary')}
-                  label="Rating Category"
-                />
-              </Grid>
-              <Grid item xs={9} sm={3}>
+              {/* Simple shared fields: Restaurant/Brand + Food Name */}
+              {/* In add mode: shown here (before score). In edit mode: shown after divider below. */}
+              {!isEdit && renderSimpleSharedFields(form, setShared)}
+
+              {/* Category: always in edit, advanced-only in add */}
+              {(isEdit || showAdvanced) && (
+                <Grid item xs={12} sm={7}>
+                  <CategorySelect
+                    categories={categories}
+                    value={form.primaryRating.ratingCategory}
+                    onChange={makeRatingCategoryChangeHandler('primary')}
+                    label={LABEL_CATEGORY}
+                  />
+                </Grid>
+              )}
+
+              {/* Rating (score) — always visible */}
+              <Grid item xs={9} sm={(isEdit || showAdvanced) ? 3 : 4}>
                 <TextField
-                  label="Score"
+                  label={LABEL_RATING}
                   value={form.primaryRating.score}
                   onChange={(e) => setPrimary('score', e.target.value)}
                   fullWidth size="small"
                 />
               </Grid>
+
+              {/* Add / re-rate buttons */}
               {!isEdit && !isBulkEdit && (
                 <Grid item xs={3} sm={2} sx={{ display: 'flex', alignItems: 'center' }}>
                   <Tooltip title="Add another item from this visit (separate entry)">
@@ -572,15 +597,35 @@ export default function AddEditEntryModal({
                 </Grid>
               )}
 
-              {/* ── Primary shared fields ────────────────────────────── */}
-              <Grid item xs={12}><Divider /></Grid>
-              {renderSharedFields(
-                form,
-                (field, value) => setShared(field, value),
-                (v) => setForm((f) => ({ ...f, dateRated: v, dateRatedMs: dateInputToMs(v) }))
+              {/* Show / Hide Advanced toggle (add/bulk-edit mode only) */}
+              {!isEdit && (
+                <Grid item xs={12}>
+                  <Button
+                    size="small"
+                    variant="text"
+                    sx={{ textTransform: 'none', color: 'text.secondary', p: 0, minWidth: 0 }}
+                    onClick={() => setShowAdvanced((v) => !v)}
+                  >
+                    {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
+                  </Button>
+                </Grid>
               )}
 
-              {/* ── Additional ratings ───────────────────────────────── */}
+              {/* Advanced fields: divider + (restaurant/food name in edit) + location/date/notes/picture */}
+              {(isEdit || showAdvanced) && (
+                <>
+                  <Grid item xs={12}><Divider /></Grid>
+                  {/* In edit mode, simple fields appear here (current position) */}
+                  {isEdit && renderSimpleSharedFields(form, setShared)}
+                  {renderAdvancedSharedFields(
+                    form,
+                    setShared,
+                    (v) => setForm((f) => ({ ...f, dateRated: v, dateRatedMs: dateInputToMs(v) }))
+                  )}
+                </>
+              )}
+
+              {/* ── Additional ratings ───────────────────────────────────── */}
               {!isEdit && (() => {
                 // Map entry id → actual index in additionalRatings (for all handlers)
                 const idxById = new Map(form.additionalRatings.map((r, i) => [r.id, i]));
@@ -622,22 +667,31 @@ export default function AddEditEntryModal({
                         <Divider sx={{ mt: 0.5 }} />
                       </Grid>
 
-                      <Grid item xs={12} sm={7}>
-                        <CategorySelect
-                          categories={categories}
-                          value={r.ratingCategory}
-                          onChange={makeRatingCategoryChangeHandler(`additional-${idx}`)}
-                          label="Rating Category"
-                        />
-                      </Grid>
-                      <Grid item xs={9} sm={3}>
+                      {/* Simple shared fields */}
+                      {renderSimpleSharedFields(r, (field, value) => setAdditional(idx, field, value))}
+
+                      {/* Category: advanced-only */}
+                      {showAdvanced && (
+                        <Grid item xs={12} sm={7}>
+                          <CategorySelect
+                            categories={categories}
+                            value={r.ratingCategory}
+                            onChange={makeRatingCategoryChangeHandler(`additional-${idx}`)}
+                            label={LABEL_CATEGORY}
+                          />
+                        </Grid>
+                      )}
+
+                      {/* Rating (score) — always visible */}
+                      <Grid item xs={9} sm={showAdvanced ? 3 : 4}>
                         <TextField
-                          label="Score"
+                          label={LABEL_RATING}
                           value={r.score}
                           onChange={(e) => setAdditional(idx, 'score', e.target.value)}
                           fullWidth size="small"
                         />
                       </Grid>
+
                       {!isBulkEdit && (
                         <Grid item xs={3} sm={2} sx={{ display: 'flex', alignItems: 'center' }}>
                           <Tooltip title="Add another item from this visit (separate entry)">
@@ -653,7 +707,8 @@ export default function AddEditEntryModal({
                         </Grid>
                       )}
 
-                      {renderSharedFields(
+                      {/* Advanced shared fields */}
+                      {showAdvanced && renderAdvancedSharedFields(
                         r,
                         (field, value) => setAdditional(idx, field, value),
                         (v) => setForm((f) => {

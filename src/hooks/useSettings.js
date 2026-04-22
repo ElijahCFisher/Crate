@@ -6,12 +6,13 @@ export function useSettings(folderId) {
   const [following, setFollowing] = useState([]);           // [{ email, displayName, fileId }]
   const [requestedToFollow, setRequestedToFollow] = useState([]); // [{ email, displayName }]
   const [sharedWith, setSharedWith] = useState([]);         // [{ email, displayName }]
+  const [showAdvancedByDefault, setShowAdvancedByDefault] = useState(false);
   const [fileId, setFileId] = useState(null);
 
   const fileIdRef = useRef(null);
   // Single ref tracking the authoritative settings state, used when writing
   // to ensure we never lose fields that were updated in a sibling callback.
-  const stateRef = useRef({ bulkAdds: [], following: [], requestedToFollow: [], sharedWith: [] });
+  const stateRef = useRef({ bulkAdds: [], following: [], requestedToFollow: [], sharedWith: [], showAdvancedByDefault: false });
   // Per-field refs so callbacks can read current values without stale closures.
   const followingRef = useRef([]);
   const requestedRef = useRef([]);
@@ -24,12 +25,13 @@ export function useSettings(folderId) {
     if (!folderId) {
       setFileId(null);
       fileIdRef.current = null;
-      const empty = { bulkAdds: [], following: [], requestedToFollow: [], sharedWith: [] };
+      const empty = { bulkAdds: [], following: [], requestedToFollow: [], sharedWith: [], showAdvancedByDefault: false };
       stateRef.current = empty;
       setBulkAdds([]);
       setFollowing([]);
       setRequestedToFollow([]);
       setSharedWith([]);
+      setShowAdvancedByDefault(false);
       return;
     }
     let cancelled = false;
@@ -46,6 +48,7 @@ export function useSettings(folderId) {
           following: settings.following || [],
           requestedToFollow: settings.requestedToFollow || [],
           sharedWith: settings.sharedWith || [],
+          showAdvancedByDefault: settings.showAdvancedByDefault ?? false,
         };
         stateRef.current = s;
         followingRef.current = s.following;
@@ -54,6 +57,7 @@ export function useSettings(folderId) {
         setFollowing(s.following);
         setRequestedToFollow(s.requestedToFollow);
         setSharedWith(s.sharedWith);
+        setShowAdvancedByDefault(s.showAdvancedByDefault);
       } catch (err) {
         console.error('Settings load failed:', err);
       }
@@ -142,10 +146,16 @@ export function useSettings(folderId) {
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const updateShowAdvancedByDefault = useCallback((value) => {
+    setShowAdvancedByDefault(value);
+    persist({ showAdvancedByDefault: value });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   return {
     bulkAdds, addBulkAdd,
     following, addToFollowing, removeFromFollowing, promoteToFollowing,
     requestedToFollow, addToRequestedToFollow, removeFromRequestedToFollow,
     sharedWith, addToSharedWith,
+    showAdvancedByDefault, updateShowAdvancedByDefault,
   };
 }

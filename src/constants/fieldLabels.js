@@ -1,0 +1,9 @@
+export const LABEL_RESTAURANT = 'Restaurant/Brand';
+export const LABEL_FOOD_NAME = 'Food Name';
+export const LABEL_RATING = 'Rating';
+export const LABEL_CATEGORY = 'Category';
+export const LABEL_LOCATION = 'Location';
+export const LABEL_DATE = 'Date Rated';
+export const LABEL_ADDITIONAL_INFO = 'Additional Information';
+export const LABEL_NOTES = 'Notes';
+export const LABEL_PICTURE = 'Picture URL';

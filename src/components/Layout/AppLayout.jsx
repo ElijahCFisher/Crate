@@ -13,6 +13,7 @@ import CategoriesPanel from '../Categories/CategoriesPanel';
 import BulkAddsPanel from '../BulkAdds/BulkAddsPanel';
 import FriendsPanel from '../Friends/FriendsPanel';
 import FollowRequestDialog from '../Friends/FollowRequestDialog';
+import SettingsPage from '../Settings/SettingsPage';
 import { useSettings } from '../../hooks/useSettings';
 
 function decodeFollowRequest(encoded) {
@@ -50,6 +51,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     following, addToFollowing, removeFromFollowing, promoteToFollowing,
     requestedToFollow, addToRequestedToFollow, removeFromRequestedToFollow,
     sharedWith, addToSharedWith,
+    showAdvancedByDefault, updateShowAdvancedByDefault,
   } = useSettings(folderId);
 
   // Tab
@@ -203,6 +205,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
             label={`Friends${following.length ? ` (${following.length})` : ''}`}
             value="friends"
           />
+          <Tab label="Settings" value="settings" />
         </Tabs>
 
         {tab === 'entries' && (
@@ -234,6 +237,13 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
           />
         )}
 
+        {tab === 'settings' && (
+          <SettingsPage
+            showAdvancedByDefault={showAdvancedByDefault}
+            onUpdateShowAdvancedByDefault={updateShowAdvancedByDefault}
+          />
+        )}
+
         {tab === 'friends' && (
           <FriendsPanel
             following={following}
@@ -262,6 +272,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         onBulkSave={bulkAddEntries ? handleBulkSave : undefined}
         onAddCategory={handleAddCategory}
         onClose={closeAddEdit}
+        showAdvancedByDefault={showAdvancedByDefault}
       />
 
       {/* Delete confirm */}

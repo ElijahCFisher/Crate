@@ -25,6 +25,10 @@ import FilterBar from '../Filters/FilterBar';
 import { applyFilters, makeDefaultFilter } from '../Filters/FilterBuilder';
 import { formatDate } from '../../utils/dateUtils';
 import { evalAdditionalInfo } from '../../utils/mathUtils';
+import {
+  LABEL_RESTAURANT, LABEL_FOOD_NAME, LABEL_RATING,
+  LABEL_CATEGORY, LABEL_LOCATION, LABEL_DATE, LABEL_NOTES,
+} from '../../constants/fieldLabels';
 
 const TABLE_PREFS_KEY = 'food_ratings_table_prefs_v1';
 function loadPrefs() {
@@ -35,13 +39,13 @@ function savePrefs(prefs) {
 }
 
 const COLUMNS = [
-  { id: 'ratingCategory', label: 'Category', sortable: true },
-  { id: 'restaurantName', label: 'Restaurant', sortable: true },
-  { id: 'specifier', label: 'Specifier', sortable: true },
-  { id: 'location', label: 'Location', sortable: true },
-  { id: 'score', label: 'Score', sortable: true, align: 'center' },
-  { id: 'dateRated', label: 'Date Rated', sortable: true },
-  { id: 'additionalInfo', label: 'Notes', sortable: false },
+  { id: 'ratingCategory', label: LABEL_CATEGORY, sortable: true },
+  { id: 'restaurantName', label: LABEL_RESTAURANT, sortable: true },
+  { id: 'specifier', label: LABEL_FOOD_NAME, sortable: true },
+  { id: 'location', label: LABEL_LOCATION, sortable: true },
+  { id: 'score', label: LABEL_RATING, sortable: true, align: 'center' },
+  { id: 'dateRated', label: LABEL_DATE, sortable: true },
+  { id: 'additionalInfo', label: LABEL_NOTES, sortable: false },
 ];
 
 // Total column count = expand cell + data columns + (optional) actions column

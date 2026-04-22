@@ -11,15 +11,19 @@ import Tooltip from '@mui/material/Tooltip';
 import ToggleButton from '@mui/material/ToggleButton';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import {
+  LABEL_RESTAURANT, LABEL_FOOD_NAME, LABEL_RATING,
+  LABEL_CATEGORY, LABEL_LOCATION, LABEL_NOTES,
+} from '../../constants/fieldLabels';
 
 const FIELDS = [
   { value: 'any', label: 'Any field' },
-  { value: 'restaurantName', label: 'Restaurant' },
-  { value: 'specifier', label: 'Specifier' },
-  { value: 'location', label: 'Location' },
-  { value: 'score', label: 'Score' },
-  { value: 'additionalInfo', label: 'Notes' },
-  { value: 'ratingCategory', label: 'Category' },
+  { value: 'restaurantName', label: LABEL_RESTAURANT },
+  { value: 'specifier', label: LABEL_FOOD_NAME },
+  { value: 'location', label: LABEL_LOCATION },
+  { value: 'score', label: LABEL_RATING },
+  { value: 'additionalInfo', label: LABEL_NOTES },
+  { value: 'ratingCategory', label: LABEL_CATEGORY },
   { value: 'uuid', label: 'UUID' },
 ];
 
