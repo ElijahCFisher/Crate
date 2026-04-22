@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
+import Tooltip from '@mui/material/Tooltip';
 
 const filter = createFilterOptions();
 
@@ -28,21 +29,61 @@ function buildOptions(categories) {
 
 /**
  * Single-select autocomplete for picking a category (or creating a new one).
- * Passes the selected UUID string to onChange.
+ *
+ * onChange(uuid, newName):
+ *   - uuid set, newName null  → existing category selected
+ *   - uuid null/empty, newName set → pending new category name (created at submit time)
+ *   - uuid empty, newName null → cleared
+ *
+ * newCategoryName: when set (non-empty string), shows a "New" chip indicating
+ *   the value will become a new category on submit.
  */
-export function CategorySelect({ categories, value, onChange, label = 'Category', required = false }) {
+export function CategorySelect({
+  categories,
+  value,
+  onChange,
+  label = 'Category',
+  required = false,
+  newCategoryName = null,
+}) {
   const options = buildOptions(categories);
-  const selectedOption = options.find((o) => o.uuid === value) || null;
+
+  // Synthetic option representing a pending new category (not yet created)
+  const pendingOption = newCategoryName
+    ? { uuid: '__new__', label: newCategoryName, isNew: true }
+    : null;
+
+  const selectedOption = pendingOption || options.find((o) => o.uuid === value) || null;
 
   return (
     <Autocomplete
       value={selectedOption}
       onChange={(_, newValue) => {
         if (newValue && newValue.inputValue) {
-          // "Create new" option selected — caller must handle creation
+          // User clicked the "Add 'Foo'" option from the dropdown
           onChange(null, newValue.inputValue);
+        } else if (newValue?.isNew) {
+          // Re-selected the pending new option — no change needed
         } else {
           onChange(newValue ? newValue.uuid : '', null);
+        }
+      }}
+      onInputChange={(_, _inputValue, reason) => {
+        if (reason === 'clear') onChange('', null);
+      }}
+      onBlur={(e) => {
+        const typed = (e.target.value || '').trim();
+        if (!typed) {
+          if (value || newCategoryName) onChange('', null);
+          return;
+        }
+        const match = options.find((o) => o.label.toLowerCase() === typed.toLowerCase());
+        if (match) {
+          // Exact match with an existing category — select it
+          if (match.uuid !== value) onChange(match.uuid, null);
+        } else if (typed !== newCategoryName) {
+          // New name — mark as pending new category
+          onChange(null, typed);
         }
       }}
       filterOptions={(options, params) => {
@@ -55,11 +96,37 @@ export function CategorySelect({ categories, value, onChange, label = 'Category'
       }}
       options={options}
       getOptionLabel={(opt) => opt.inputValue || opt.label || ''}
+      isOptionEqualToValue={(opt, val) => {
+        if (!val) return false;
+        if (opt.isNew && val.isNew) return opt.label === val.label;
+        return opt.uuid === val.uuid;
+      }}
       renderInput={(params) => (
-        <TextField {...params} label={label} required={required} size="small" />
+        <TextField
+          {...params}
+          label={label}
+          required={required}
+          size="small"
+          InputProps={{
+            ...params.InputProps,
+            startAdornment: pendingOption ? (
+              <>
+                <Tooltip title="You're about to create a new category. If this is not intentional, click on an existing category while inputting.">
+                  <Chip
+                    label="New"
+                    size="small"
+                    color="warning"
+                    sx={{ mr: 0.5, height: 18, fontSize: '0.65rem', '& .MuiChip-label': { px: 0.75 } }}
+                  />
+                </Tooltip>
+                {params.InputProps.startAdornment}
+              </>
+            ) : params.InputProps.startAdornment,
+          }}
+        />
       )}
+      clearOnBlur={false}
       selectOnFocus
-      clearOnBlur
       handleHomeEndKeys
       freeSolo
     />
