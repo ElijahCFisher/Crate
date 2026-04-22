@@ -149,6 +149,33 @@ export async function findOrCreateJsonFile(folderId, fileName, defaultContent = 
   return file.id;
 }
 
+export async function getUserProfile() {
+  const res = await driveFetch('https://www.googleapis.com/oauth2/v3/userinfo');
+  if (!res.ok) throw new Error('Failed to fetch user profile');
+  return res.json(); // { email, name, picture, sub, ... }
+}
+
+export async function shareFile(fileId, email) {
+  const res = await driveRequest(
+    `${DRIVE_API}/files/${fileId}/permissions?sendNotificationEmail=false`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'reader', type: 'user', emailAddress: email }),
+    }
+  );
+  return res.json();
+}
+
+export async function listSharedFoodRatingFiles(fileName) {
+  const q = `name='${fileName}' and sharedWithMe=true and trashed=false`;
+  const res = await driveRequest(
+    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name,sharingUser)&spaces=drive`
+  );
+  const data = await res.json();
+  return data.files || [];
+}
+
 export async function writeJsonFile(fileId, jsonString) {
   const boundary = 'upload_boundary_json';
   const uploadBody = [

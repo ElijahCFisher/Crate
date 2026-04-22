@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Box from '@mui/material/Box';
 import Container from '@mui/material/Container';
 import LinearProgress from '@mui/material/LinearProgress';
@@ -11,13 +11,25 @@ import DeleteConfirmDialog from '../Entries/DeleteConfirmDialog';
 import ExportImportDialog from '../ExportImport/ExportImportDialog';
 import CategoriesPanel from '../Categories/CategoriesPanel';
 import BulkAddsPanel from '../BulkAdds/BulkAddsPanel';
+import FriendsPanel from '../Friends/FriendsPanel';
+import FollowRequestDialog from '../Friends/FollowRequestDialog';
 import { useSettings } from '../../hooks/useSettings';
+
+function decodeFollowRequest(encoded) {
+  try {
+    const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(base64));
+  } catch {
+    return null;
+  }
+}
 
 export default function AppLayout({ auth, data, onReauthenticate }) {
   const {
     combined,
     foodEntries,
     categories,
+    fileId: dataFileId,
     folderId,
     loading,
     syncing,
@@ -33,7 +45,12 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     pendingCount,
   } = data;
 
-  const { bulkAdds, addBulkAdd } = useSettings(folderId);
+  const {
+    bulkAdds, addBulkAdd,
+    following, addToFollowing, removeFromFollowing, promoteToFollowing,
+    requestedToFollow, addToRequestedToFollow, removeFromRequestedToFollow,
+    sharedWith, addToSharedWith,
+  } = useSettings(folderId);
 
   // Tab
   const [tab, setTab] = useState('entries');
@@ -44,6 +61,25 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
   const [bulkAddEntries, setBulkAddEntries] = useState(null);
   const [deleteDialogEntry, setDeleteDialogEntry] = useState(null);
   const [exportImportOpen, setExportImportOpen] = useState(false);
+
+  // Follow request from URL
+  const [followRequester, setFollowRequester] = useState(null);
+
+  // Detect ?followRequest= in the URL on load (and after auth)
+  useEffect(() => {
+    if (!auth.isAuthenticated || !dataFileId) return;
+    const params = new URLSearchParams(window.location.search);
+    const encoded = params.get('followRequest');
+    if (!encoded) return;
+    const decoded = decodeFollowRequest(encoded);
+    if (decoded?.email) {
+      setFollowRequester(decoded);
+      // Clean the URL so refreshing doesn't re-trigger the dialog
+      const url = new URL(window.location.href);
+      url.searchParams.delete('followRequest');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [auth.isAuthenticated, dataFileId]);
 
   function openAdd() {
     setEditingEntry(null);
@@ -118,6 +154,11 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     setDeleteDialogEntry(null);
   }
 
+  function handleFollowAccept(requester) {
+    addToSharedWith({ email: requester.email, displayName: requester.displayName || requester.email });
+    setFollowRequester(null);
+  }
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <Header
@@ -158,6 +199,10 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
             label={`Bulk Adds${bulkAdds.length ? ` (${bulkAdds.length})` : ''}`}
             value="bulkAdds"
           />
+          <Tab
+            label={`Friends${following.length ? ` (${following.length})` : ''}`}
+            value="friends"
+          />
         </Tabs>
 
         {tab === 'entries' && (
@@ -186,6 +231,22 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
             bulkAdds={bulkAdds}
             combined={combined}
             onOpen={openFromBulk}
+          />
+        )}
+
+        {tab === 'friends' && (
+          <FriendsPanel
+            following={following}
+            requestedToFollow={requestedToFollow}
+            sharedWith={sharedWith}
+            userProfile={auth.userProfile}
+            dataFileId={dataFileId}
+            onAddToFollowing={addToFollowing}
+            onRemoveFromFollowing={removeFromFollowing}
+            onRemoveFromRequestedToFollow={removeFromRequestedToFollow}
+            onPromoteToFollowing={promoteToFollowing}
+            onAddToSharedWith={addToSharedWith}
+            onAddToRequestedToFollow={addToRequestedToFollow}
           />
         )}
       </Container>
@@ -219,6 +280,15 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         exportCsv={exportCsv}
         onImportCsv={importCsv}
         syncing={syncing}
+      />
+
+      {/* Follow request from link */}
+      <FollowRequestDialog
+        open={!!followRequester}
+        requester={followRequester}
+        dataFileId={dataFileId}
+        onAccept={handleFollowAccept}
+        onDecline={() => setFollowRequester(null)}
       />
     </Box>
   );

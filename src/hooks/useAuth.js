@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useGoogleLogin } from '@react-oauth/google';
 import { API_BASE, GOOGLE_AUTH_SCOPE } from '../config';
 import { clearGoogleAccessToken } from '../services/googleTokenService';
+import { getUserProfile } from '../services/driveService';
 
 /** Thin wrapper around the Worker's JSON API. Throws on non-2xx. */
 async function workerFetch(path, options = {}) {
@@ -27,6 +28,7 @@ export function useAuth() {
   const [isSilentTrying, setIsSilentTrying]   = useState(true);
   const [isSigningIn,    setIsSigningIn]       = useState(false);
   const [authError,      setAuthError]         = useState(null);
+  const [userProfile,    setUserProfile]       = useState(null); // { email, displayName }
 
   // Prevents concurrent silent session checks (mount + online event racing).
   const silentCheckInProgress = useRef(false);
@@ -42,6 +44,9 @@ export function useAuth() {
       clearGoogleAccessToken(); // will be lazily re-fetched on first Drive call
       setIsAuthenticated(true);
       setAuthError(null);
+      getUserProfile()
+        .then((p) => setUserProfile({ email: p.email, displayName: p.name || p.email }))
+        .catch(() => {});
       return true;
     } catch {
       clearGoogleAccessToken();
@@ -88,6 +93,9 @@ export function useAuth() {
         setIsAuthenticated(true);
         setIsSigningIn(false);
         setAuthError(null);
+        getUserProfile()
+          .then((p) => setUserProfile({ email: p.email, displayName: p.name || p.email }))
+          .catch(() => {});
       } catch (err) {
         setIsSigningIn(false);
         setAuthError(err.message || 'Sign-in failed.');
@@ -117,8 +125,9 @@ export function useAuth() {
     } finally {
       clearGoogleAccessToken();
       setIsAuthenticated(false);
+      setUserProfile(null);
     }
   }, []);
 
-  return { isAuthenticated, isSilentTrying, isSigningIn, authError, signIn, signOut };
+  return { isAuthenticated, isSilentTrying, isSigningIn, authError, signIn, signOut, userProfile };
 }

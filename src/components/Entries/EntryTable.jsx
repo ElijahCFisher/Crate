@@ -44,8 +44,9 @@ const COLUMNS = [
   { id: 'additionalInfo', label: 'Notes', sortable: false },
 ];
 
-// Total column count = expand cell + data columns + actions column
+// Total column count = expand cell + data columns + (optional) actions column
 const TOTAL_COLS = COLUMNS.length + 2;
+const TOTAL_COLS_READONLY = COLUMNS.length + 1;
 
 function ScoreBadge({ score }) {
   if (score == null) return <Typography variant="body2" color="text.disabled">—</Typography>;
@@ -82,6 +83,7 @@ export default function EntryTable({
   onAdd,
   onEdit,
   onDelete,
+  readOnly = false,
 }) {
   const [filters, setFilters] = useState(() => loadPrefs()?.filters || [makeDefaultFilter()]);
   const [order, setOrder] = useState(() => loadPrefs()?.order || 'asc');
@@ -283,18 +285,20 @@ export default function EntryTable({
         <TableCell align="center"><ScoreBadge score={entry.score} /></TableCell>
         <TableCell>{formatDate(entry.dateRated)}</TableCell>
         <TableCell><NotesCell text={entry.additionalInfo} /></TableCell>
-        <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-          <Tooltip title="Edit">
-            <IconButton size="small" onClick={() => onEdit(entry)}>
-              <EditIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Delete">
-            <IconButton size="small" onClick={() => onDelete(entry)} color="error">
-              <DeleteIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </TableCell>
+        {!readOnly && (
+          <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+            <Tooltip title="Edit">
+              <IconButton size="small" onClick={() => onEdit(entry)}>
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Delete">
+              <IconButton size="small" onClick={() => onDelete(entry)} color="error">
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </TableCell>
+        )}
       </TableRow>
     );
   }
@@ -308,9 +312,11 @@ export default function EntryTable({
             ({searchedEntries.length}{searchedEntries.length !== foodEntries.length ? ` / ${foodEntries.length}` : ''})
           </Typography>
         </Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd} size="small">
-          Add Entry
-        </Button>
+        {!readOnly && (
+          <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd} size="small">
+            Add Entry
+          </Button>
+        )}
       </Box>
 
       <FilterBar filters={filters} onFiltersChange={setFilters} />
@@ -338,13 +344,13 @@ export default function EntryTable({
                   )}
                 </TableCell>
               ))}
-              <TableCell align="right">Actions</TableCell>
+              {!readOnly && <TableCell align="right">Actions</TableCell>}
             </TableRow>
           </TableHead>
           <TableBody>
             {groups.length === 0 && !loading && (
               <TableRow>
-                <TableCell colSpan={TOTAL_COLS} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={readOnly ? TOTAL_COLS_READONLY : TOTAL_COLS} align="center" sx={{ py: 4 }}>
                   <Typography variant="body2" color="text.secondary">
                     {foodEntries.length === 0
                       ? 'No entries yet. Click "Add Entry" to get started.'
