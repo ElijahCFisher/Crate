@@ -68,6 +68,9 @@ async function driveRequest(url, options = {}) {
   const res = await driveFetch(url, options);
   if (!res.ok && res.status !== 412) {
     const body = await res.text().catch(() => '');
+    if (res.status === 403 && body.includes('insufficientPermissions')) {
+      throw new Error('Not authenticated');
+    }
     throw new Error(`Drive API error ${res.status}: ${body}`);
   }
   return res;
@@ -199,6 +202,9 @@ export async function writeJsonFile(fileId, jsonString) {
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
+    if (res.status === 403 && errBody.includes('insufficientPermissions')) {
+      throw new Error('Not authenticated');
+    }
     throw new Error(`Drive write failed ${res.status}: ${errBody}`);
   }
 }
@@ -256,6 +262,9 @@ export async function writeFile(fileId, content, expectedVersion) {
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
+    if (res.status === 403 && errBody.includes('insufficientPermissions')) {
+      throw new Error('Not authenticated');
+    }
     throw new Error(`Drive write failed ${res.status}: ${errBody}`);
   }
 

@@ -4,6 +4,8 @@ import { API_BASE, GOOGLE_AUTH_SCOPE } from '../config';
 import { clearGoogleAccessToken } from '../services/googleTokenService';
 import { getUserProfile } from '../services/driveService';
 
+const SCOPE_STORAGE_KEY = 'food_rating_auth_scope';
+
 /** Thin wrapper around the Worker's JSON API. Throws on non-2xx. */
 async function workerFetch(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -41,6 +43,18 @@ export function useAuth() {
     setIsSilentTrying(true);
     try {
       await workerFetch('/api/session', { method: 'GET' });
+
+      // If the required scopes changed since the user last signed in, their
+      // refresh token won't cover the new scopes. Force re-auth now rather than
+      // letting them hit a confusing 403 later.
+      const storedScope = localStorage.getItem(SCOPE_STORAGE_KEY);
+      if (storedScope !== null && storedScope !== GOOGLE_AUTH_SCOPE) {
+        clearGoogleAccessToken();
+        setIsAuthenticated(false);
+        setAuthError('App permissions were updated — please sign in again.');
+        return false;
+      }
+
       clearGoogleAccessToken(); // will be lazily re-fetched on first Drive call
       setIsAuthenticated(true);
       setAuthError(null);
@@ -90,6 +104,7 @@ export function useAuth() {
         });
 
         clearGoogleAccessToken();   // fresh token will be fetched on first Drive call
+        localStorage.setItem(SCOPE_STORAGE_KEY, GOOGLE_AUTH_SCOPE);
         setIsAuthenticated(true);
         setIsSigningIn(false);
         setAuthError(null);
