@@ -27,10 +27,11 @@ async function workerFetch(path, options = {}) {
 export function useAuth() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   // Start true so we show the loading screen while the session check runs.
-  const [isSilentTrying, setIsSilentTrying]   = useState(true);
-  const [isSigningIn,    setIsSigningIn]       = useState(false);
-  const [authError,      setAuthError]         = useState(null);
-  const [userProfile,    setUserProfile]       = useState(null); // { email, displayName }
+  const [isSilentTrying,     setIsSilentTrying]     = useState(true);
+  const [isSigningIn,        setIsSigningIn]         = useState(false);
+  const [authError,          setAuthError]           = useState(null);
+  const [userProfile,        setUserProfile]         = useState(null); // { email, displayName }
+  const [needsConsentReauth, setNeedsConsentReauth] = useState(false);
 
   // Prevents concurrent silent session checks (mount + online event racing).
   const silentCheckInProgress = useRef(false);
@@ -48,9 +49,10 @@ export function useAuth() {
       // refresh token won't cover the new scopes. Force re-auth now rather than
       // letting them hit a confusing 403 later.
       const storedScope = localStorage.getItem(SCOPE_STORAGE_KEY);
-      if (storedScope !== null && storedScope !== GOOGLE_AUTH_SCOPE) {
+      if (storedScope !== GOOGLE_AUTH_SCOPE) {
         clearGoogleAccessToken();
         setIsAuthenticated(false);
+        setNeedsConsentReauth(true);
         setAuthError('App permissions were updated — please sign in again.');
         return false;
       }
@@ -89,50 +91,71 @@ export function useAuth() {
     return () => window.removeEventListener('online', handleOnline);
   }, [isAuthenticated, checkSession]);
 
-  // Auth-code popup flow — the Worker exchanges the code for tokens.
-  const login = useGoogleLogin({
+  // Shared callbacks for both login instances.
+  const onSuccess = useCallback(async ({ code }) => {
+    try {
+      await workerFetch('/oauth/google/code', {
+        method:  'POST',
+        headers: { 'X-Requested-With': 'XmlHttpRequest' },
+        body:    JSON.stringify({ code }),
+      });
+
+      clearGoogleAccessToken();
+      localStorage.setItem(SCOPE_STORAGE_KEY, GOOGLE_AUTH_SCOPE);
+      setNeedsConsentReauth(false);
+      setIsAuthenticated(true);
+      setIsSigningIn(false);
+      setAuthError(null);
+      getUserProfile()
+        .then((p) => setUserProfile({ email: p.email, displayName: p.name || p.email }))
+        .catch(() => {});
+    } catch (err) {
+      setIsSigningIn(false);
+      setAuthError(err.message || 'Sign-in failed.');
+    }
+  }, []);
+
+  const onError = useCallback(() => {
+    setIsSigningIn(false);
+    setAuthError('Sign-in failed. Please try again.');
+  }, []);
+
+  const onNonOAuthError = useCallback(() => {
+    setIsSigningIn(false);
+    setAuthError('Sign-in was cancelled or blocked.');
+  }, []);
+
+  // Normal login for routine sign-ins.
+  const loginNormal = useGoogleLogin({
     flow:    'auth-code',
     ux_mode: 'popup',
     scope:   GOOGLE_AUTH_SCOPE,
+    onSuccess,
+    onError,
+    onNonOAuthError,
+  });
 
-    onSuccess: async ({ code }) => {
-      try {
-        await workerFetch('/oauth/google/code', {
-          method:  'POST',
-          headers: { 'X-Requested-With': 'XmlHttpRequest' },
-          body:    JSON.stringify({ code }),
-        });
-
-        clearGoogleAccessToken();   // fresh token will be fetched on first Drive call
-        localStorage.setItem(SCOPE_STORAGE_KEY, GOOGLE_AUTH_SCOPE);
-        setIsAuthenticated(true);
-        setIsSigningIn(false);
-        setAuthError(null);
-        getUserProfile()
-          .then((p) => setUserProfile({ email: p.email, displayName: p.name || p.email }))
-          .catch(() => {});
-      } catch (err) {
-        setIsSigningIn(false);
-        setAuthError(err.message || 'Sign-in failed.');
-      }
-    },
-
-    onError: () => {
-      setIsSigningIn(false);
-      setAuthError('Sign-in failed. Please try again.');
-    },
-
-    onNonOAuthError: () => {
-      setIsSigningIn(false);
-      setAuthError('Sign-in was cancelled or blocked.');
-    },
+  // Consent login used only when a scope mismatch is detected — forces Google
+  // to show the consent screen and issue a fresh refresh token with the updated scopes.
+  const loginWithConsent = useGoogleLogin({
+    flow:    'auth-code',
+    ux_mode: 'popup',
+    scope:   GOOGLE_AUTH_SCOPE,
+    prompt:  'consent',
+    onSuccess,
+    onError,
+    onNonOAuthError,
   });
 
   const signIn = useCallback(() => {
     setIsSigningIn(true);
     setAuthError(null);
-    login();
-  }, [login]);
+    if (needsConsentReauth) {
+      loginWithConsent();
+    } else {
+      loginNormal();
+    }
+  }, [needsConsentReauth, loginNormal, loginWithConsent]);
 
   const signOut = useCallback(async () => {
     try {
@@ -144,5 +167,5 @@ export function useAuth() {
     }
   }, []);
 
-  return { isAuthenticated, isSilentTrying, isSigningIn, authError, signIn, signOut, userProfile };
+  return { isAuthenticated, isSilentTrying, isSigningIn, authError, signIn, signOut, userProfile, needsConsentReauth };
 }
