@@ -17,7 +17,21 @@ const CACHE_KEY  = 'food_ratings_data_cache_v1';
 const QUEUE_KEY  = 'food_ratings_op_queue_v1';
 
 function saveCache(data) {
-  try { localStorage.setItem(CACHE_KEY, csvService.generate(data)); } catch {}
+  // Try saving the full dataset (combined + changelog).
+  try {
+    localStorage.setItem(CACHE_KEY, csvService.generate(data));
+    return;
+  } catch {}
+  // Full save exceeded the quota (~5 MB limit). Try combined-only — the
+  // changelog isn't needed for the startup display and roughly halves the size.
+  // init() will restore the full changelog from Drive on next load.
+  try {
+    localStorage.setItem(CACHE_KEY, csvService.generate({ combined: data.combined, changelog: [] }));
+    return;
+  } catch {}
+  // Still too large — clear the stale cache so the next reload doesn't show
+  // out-of-date data while Drive loads.
+  try { localStorage.removeItem(CACHE_KEY); } catch {}
 }
 function loadCache() {
   try { const t = localStorage.getItem(CACHE_KEY); return t ? csvService.parse(t) : null; } catch { return null; }
@@ -54,7 +68,13 @@ export function useData(isAuthenticated) {
   const isOfflineRef = useRef(!navigator.onLine);
   // Stores the latest init function so the online-event handler can call it
   // if the page was loaded while offline (fileId was never set).
-  const initRef      = useRef(null);
+  const initRef        = useRef(null);
+  // Monotonically-increasing counter used to discard results from a stale
+  // init() invocation. React StrictMode (and any other cause of concurrent
+  // init calls) can run the effect twice; only the last invocation should
+  // win so that a faster-but-stale CDN response never overwrites a
+  // slower-but-fresh one.
+  const initCounterRef = useRef(0);
   // Serializes all background Drive writes so concurrent saves (e.g. multiple
   // entry groups submitted at once) never race and overwrite each other.
   const driveWriteQueueRef = useRef(Promise.resolve());
@@ -86,6 +106,13 @@ export function useData(isAuthenticated) {
 
     async function init() {
       initRef.current = init; // keep ref fresh for the online-event handler
+
+      // Stamp this invocation so we can discard results if a newer init()
+      // starts before this one finishes (React StrictMode runs effects twice;
+      // a stale CDN response from the first call must not overwrite the fresh
+      // response from the second call).
+      const myCount = ++initCounterRef.current;
+
       setLoading(true); setSyncError(null);
       try {
         const resolvedFolderId = await driveService.findOrCreateFolder(DRIVE_FOLDER_NAME);
@@ -93,6 +120,11 @@ export function useData(isAuthenticated) {
         const id = await driveService.findOrCreateFile(resolvedFolderId, DRIVE_FILE_NAME);
         setFileId(id); fileIdRef.current = id;
         const { content, etag } = await driveService.readFile(id);
+
+        // Another init() started while we were awaiting — its result is newer,
+        // so silently abandon this one.
+        if (myCount !== initCounterRef.current) return;
+
         const data = csvService.parse(content);
 
         // ── First-time sync: Drive is empty but cache has data ────────────────
@@ -112,6 +144,7 @@ export function useData(isAuthenticated) {
               csvService.generate(cached),
               etag,
             );
+            if (myCount !== initCounterRef.current) return;
             if (!writeResult.ok) {
               throw new Error(`Failed to seed Drive from cache (HTTP ${writeResult.status}).`);
             }
@@ -131,6 +164,7 @@ export function useData(isAuthenticated) {
         // Flush any queued ops from a previous offline session
         if (loadQueue().length) flushQueue(id);
       } catch (err) {
+        if (myCount !== initCounterRef.current) return;
         const cached = loadCache();
         if (cached) {
           setCombined(new Map(cached.combined));
@@ -141,7 +175,7 @@ export function useData(isAuthenticated) {
           setSyncError(err.message);
         }
       } finally {
-        setLoading(false);
+        if (myCount === initCounterRef.current) setLoading(false);
       }
     }
 
