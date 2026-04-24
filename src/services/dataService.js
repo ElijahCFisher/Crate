@@ -157,6 +157,19 @@ export async function deleteEntry(fileId, entryUuid) {
 }
 
 /**
+ * Write a flat list of pre-built entries in one atomic applyChanges pass.
+ * Callers are responsible for cross-linking identicals before calling this.
+ */
+export async function addEntries(fileId, entries) {
+  const normalized = entries.map((d) => ({ ...ENTRY_DEFAULTS, ...d }));
+  const changes = normalized.map((e) => createAdditionChange(e));
+  return applyChanges(fileId, changes, (data) => {
+    for (const e of normalized) data.combined.set(e.uuid, e);
+    return {};
+  });
+}
+
+/**
  * Batch-import entries that already have UUIDs and pre-computed ancestor chains.
  * Skips entries whose UUID already exists in combined.
  */

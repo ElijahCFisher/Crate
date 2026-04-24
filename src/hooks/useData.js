@@ -218,6 +218,7 @@ export function useData(isAuthenticated) {
       try {
         let result;
         if      (op.type === 'add')         result = await dataService.addEntry(id, op.entries);
+        else if (op.type === 'addEntries')  result = await dataService.addEntries(id, op.entries);
         else if (op.type === 'addCategory') result = await dataService.addCategory(id, op.categoryData);
         else if (op.type === 'modify')      result = await dataService.modifyEntry(id, op.uuid, op.updates);
         else if (op.type === 'delete')      result = await dataService.deleteEntry(id, op.uuid);
@@ -411,6 +412,61 @@ export function useData(isAuthenticated) {
   }, []);
 
   /**
+   * Add multiple entry groups in a single Drive write. Each group's entries are
+   * cross-linked as identicals; entries across groups are not linked.
+   * Returns the built groups (Array<Entry[]>) so callers can collect UUIDs.
+   */
+  const addEntryGroups = useCallback((groups) => {
+    const currentCombined = combinedRef.current;
+
+    const builtGroups = groups.map((groupData) => {
+      const entries = groupData.map((d) => ({
+        uuid: uuidv4(),
+        entryType: 'food',
+        identicals: [],
+        categories: [],
+        ratingCategory: '',
+        restaurantName: '',
+        specifier: '',
+        location: '',
+        score: null,
+        dateRated: Date.now(),
+        additionalInfo: '',
+        picture: '',
+        ...d,
+        categories: computeCategories(d.ratingCategory || '', currentCombined),
+      }));
+      if (entries.length > 1) {
+        const uuids = entries.map((e) => e.uuid);
+        entries.forEach((e, i) => { e.identicals = uuids.filter((_, j) => j !== i); });
+      }
+      return entries;
+    });
+
+    const allEntries = builtGroups.flat();
+    const changes = allEntries.map((e) => createAdditionChange(e));
+    const newChangelog = [...changelogRef.current, ...changes];
+
+    let newCombined;
+    setCombined((prev) => {
+      const next = new Map(prev);
+      allEntries.forEach((e) => next.set(e.uuid, e));
+      newCombined = next;
+      return next;
+    });
+    setChangelog((prev) => [...prev, ...changes]);
+
+    withSyncBackground(
+      (id) => dataService.addEntries(id, allEntries),
+      { type: 'addEntries', entries: allEntries },
+      newCombined,
+      newChangelog,
+    );
+
+    return builtGroups;
+  }, []);
+
+  /**
    * Add a category entry. Returns the entry synchronously so callers can
    * use the UUID right away (e.g. to select it in a dropdown).
    */
@@ -540,7 +596,7 @@ export function useData(isAuthenticated) {
     combined, changelog, categories, foodEntries,
     fileId, folderId, loading, syncing, syncError, setSyncError,
     isOffline, pendingCount,
-    addEntry, addCategory, modifyEntry, deleteEntry,
+    addEntry, addEntryGroups, addCategory, modifyEntry, deleteEntry,
     importCsv, exportCsv,
   };
 }

@@ -37,6 +37,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     syncError,
     setSyncError,
     addEntry,
+    addEntryGroups,
     addCategory,
     modifyEntry,
     deleteEntry,
@@ -116,12 +117,11 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
   }
 
   function handleSaveGroups(groups) {
-    const allUuids = [];
-    for (const group of groups) {
-      const entries = addEntry(group);
-      if (entries) allUuids.push(...entries.map((e) => e.uuid));
+    const builtGroups = addEntryGroups(groups);
+    if (builtGroups) {
+      const allUuids = builtGroups.flat().map((e) => e.uuid);
+      if (allUuids.length > 1) addBulkAdd(allUuids);
     }
-    if (allUuids.length > 1) addBulkAdd(allUuids);
   }
 
   function handleBulkSave(changes) {
