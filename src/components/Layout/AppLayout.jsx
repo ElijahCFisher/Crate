@@ -197,6 +197,8 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         <Tabs
           value={tab}
           onChange={(_, v) => setTab(v)}
+          variant="scrollable"
+          scrollButtons="auto"
           sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
         >
           <Tab
