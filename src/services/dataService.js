@@ -126,7 +126,7 @@ export async function addCategory(fileId, categoryData) {
 export async function modifyEntry(fileId, entryUuid, updates) {
   const now = Date.now();
   const changes = Object.entries(updates).map(([field, value]) =>
-    createModificationChange(entryUuid, field, String(value ?? ''))
+    createModificationChange(entryUuid, field, Array.isArray(value) ? value.join('|') : String(value ?? ''))
   );
   changes.forEach((c, i) => { c.dateOfChange = now + i; });
 
@@ -153,6 +153,45 @@ export async function deleteEntry(fileId, entryUuid) {
   return applyChanges(fileId, [change], (data) => {
     if (isLatestChangeForField(data.changelog, change)) data.combined.delete(entryUuid);
     return {};
+  });
+}
+
+/**
+ * Add entries and cross-link them with existing entries — all in one Drive write.
+ * `entries` must already have UUIDs and internal identicals set (cross-links
+ * within the new group). `existingUuids` are existing entries to link bidirectionally.
+ */
+export async function addEntriesWithLinks(fileId, entries, existingUuids = []) {
+  const addChanges = entries.map((e) => createAdditionChange(e));
+  const now = Date.now();
+  let changeIdx = addChanges.length;
+  const newUuids = entries.map((e) => e.uuid);
+
+  return applyChanges(fileId, addChanges, (data) => {
+    for (const e of entries) data.combined.set(e.uuid, e);
+    if (existingUuids.length === 0) return { entries };
+
+    for (const existingUuid of existingUuids) {
+      const existing = data.combined.get(existingUuid);
+      if (!existing) continue;
+      const updated = [...new Set([...(existing.identicals || []), ...newUuids])];
+      const change = createModificationChange(existingUuid, 'identicals', updated.join('|'));
+      change.dateOfChange = now + changeIdx++;
+      data.changelog.push(change);
+      data.combined.set(existingUuid, { ...existing, identicals: updated });
+    }
+
+    for (const entry of entries) {
+      const e = data.combined.get(entry.uuid);
+      if (!e) continue;
+      const updated = [...new Set([...(e.identicals || []), ...existingUuids])];
+      const change = createModificationChange(entry.uuid, 'identicals', updated.join('|'));
+      change.dateOfChange = now + changeIdx++;
+      data.changelog.push(change);
+      data.combined.set(entry.uuid, { ...e, identicals: updated });
+    }
+
+    return { entries };
   });
 }
 

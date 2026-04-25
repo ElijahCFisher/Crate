@@ -437,7 +437,44 @@ export default function AddEditEntryModal({
           if (Object.keys(diff).length > 0) changes.push({ uuid: r.originalUuid, updates: diff });
         }
       }
-      if (changes.length > 0) onBulkSave(changes);
+
+      // Collect new entries (no originalUuid) grouped by their linked existing UUIDs
+      function toNewEntry(r) {
+        return {
+          restaurantName: r.restaurantName,
+          specifier: r.specifier,
+          location: r.location,
+          dateRated: r.dateRatedMs ?? dateInputToMs(r.dateRated),
+          additionalInfo: r.additionalInfo,
+          picture: r.picture,
+          ratingCategory: resolveCategory(r.newCategoryName, r.ratingCategory),
+          score: r.score !== '' ? r.score : null,
+        };
+      }
+
+      const newGroupData = [];
+
+      const primaryNew = form.additionalRatings.filter((r) => r.groupId === 'primary' && !r.originalUuid);
+      if (primaryNew.length > 0) {
+        newGroupData.push({
+          entries: primaryNew.map(toNewEntry),
+          existingUuids: form.primaryOriginalUuid ? [form.primaryOriginalUuid] : [],
+        });
+      }
+
+      const otherNewByGroup = new Map();
+      for (const r of form.additionalRatings) {
+        if (r.groupId === 'primary') continue;
+        if (!otherNewByGroup.has(r.groupId)) otherNewByGroup.set(r.groupId, { entries: [], existingUuids: [] });
+        const g = otherNewByGroup.get(r.groupId);
+        if (r.originalUuid) g.existingUuids.push(r.originalUuid);
+        else g.entries.push(toNewEntry(r));
+      }
+      for (const [, g] of otherNewByGroup) {
+        if (g.entries.length > 0) newGroupData.push(g);
+      }
+
+      if (changes.length > 0 || newGroupData.length > 0) onBulkSave(changes, newGroupData);
     } else {
       function toEntry(r, scoreField, resolvedCategoryUuid) {
         return {
@@ -540,7 +577,7 @@ export default function AddEditEntryModal({
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <form onSubmit={handleSubmit}>
-        <DialogTitle>{isEdit ? 'Edit Entry' : isBulkEdit ? 'Edit Bulk Add' : 'Add Entry'}</DialogTitle>
+        <DialogTitle>{isEdit ? 'Edit Entry' : isBulkEdit ? 'Bulk Add' : 'Add Entry'}</DialogTitle>
         <DialogContent dividers>
           {saveError && <Alert severity="error" sx={{ mb: 2 }}>{saveError}</Alert>}
 
@@ -587,7 +624,7 @@ export default function AddEditEntryModal({
             </Grid>
 
             {/* Add / re-rate buttons */}
-            {!isEdit && !isBulkEdit && (
+            {!isEdit && (
               <Grid item xs={3} sm={2} sx={{ display: 'flex', alignItems: 'center' }}>
                 <Tooltip title="Add another item from this visit (separate entry)">
                   <IconButton size="small" onClick={addAdditionalRating} color="primary">
@@ -690,20 +727,18 @@ export default function AddEditEntryModal({
                       />
                     </Grid>
 
-                    {!isBulkEdit && (
-                      <Grid item xs={3} sm={2} sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Tooltip title="Add another item from this visit (separate entry)">
-                          <IconButton size="small" onClick={() => addAdditionalFromEntry(idx)} color="primary">
-                            <AddIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Add a re-rating of this entry (linked as identical — same item, different visit)">
-                          <IconButton size="small" onClick={() => addIdenticalOfEntry(idx)} sx={{ color: 'text.secondary' }}>
-                            <ReplayIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </Grid>
-                    )}
+                    <Grid item xs={3} sm={2} sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Tooltip title="Add another item from this visit (separate entry)">
+                        <IconButton size="small" onClick={() => addAdditionalFromEntry(idx)} color="primary">
+                          <AddIcon />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Add a re-rating of this entry (linked as identical — same item, different visit)">
+                        <IconButton size="small" onClick={() => addIdenticalOfEntry(idx)} sx={{ color: 'text.secondary' }}>
+                          <ReplayIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Grid>
 
                     {/* Advanced shared fields */}
                     {showAdvanced && renderAdvancedSharedFields(

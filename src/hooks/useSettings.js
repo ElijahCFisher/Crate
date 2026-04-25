@@ -81,6 +81,19 @@ export function useSettings(folderId) {
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const updateBulkAdd = useCallback((anchorUuid, newUuids) => {
+    if (!newUuids || newUuids.length === 0) return;
+    setBulkAdds((prev) => {
+      const idx = prev.findIndex((group) => group.includes(anchorUuid));
+      if (idx === -1) return prev;
+      const next = prev.map((group, i) =>
+        i === idx ? [...group, ...newUuids.filter((u) => !group.includes(u))] : group
+      );
+      persist({ bulkAdds: next });
+      return next;
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const addToFollowing = useCallback((friend) => {
     // friend: { email, displayName, fileId }
     setFollowing((prev) => {
@@ -152,7 +165,7 @@ export function useSettings(folderId) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
-    bulkAdds, addBulkAdd,
+    bulkAdds, addBulkAdd, updateBulkAdd,
     following, addToFollowing, removeFromFollowing, promoteToFollowing,
     requestedToFollow, addToRequestedToFollow, removeFromRequestedToFollow,
     sharedWith, addToSharedWith,

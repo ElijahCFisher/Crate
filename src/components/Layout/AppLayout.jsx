@@ -38,6 +38,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     setSyncError,
     addEntry,
     addEntryGroups,
+    addEntriesWithLinks,
     addCategory,
     modifyEntry,
     deleteEntry,
@@ -48,7 +49,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
   } = data;
 
   const {
-    bulkAdds, addBulkAdd,
+    bulkAdds, addBulkAdd, updateBulkAdd,
     following, addToFollowing, removeFromFollowing, promoteToFollowing,
     requestedToFollow, addToRequestedToFollow, removeFromRequestedToFollow,
     sharedWith, addToSharedWith,
@@ -124,9 +125,18 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     }
   }
 
-  function handleBulkSave(changes) {
+  function handleBulkSave(changes, newGroupData = []) {
     for (const { uuid, updates } of changes) {
       modifyEntry(uuid, updates);
+    }
+    const allNewUuids = [];
+    for (const { entries, existingUuids } of newGroupData) {
+      if (entries.length === 0) continue;
+      const newEntries = addEntriesWithLinks(entries, existingUuids);
+      allNewUuids.push(...newEntries.map((e) => e.uuid));
+    }
+    if (allNewUuids.length > 0 && bulkAddEntries?.length > 0) {
+      updateBulkAdd(bulkAddEntries[0].uuid, allNewUuids);
     }
   }
 

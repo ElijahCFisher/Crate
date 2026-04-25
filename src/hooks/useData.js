@@ -15,6 +15,8 @@ import { DRIVE_FOLDER_NAME, DRIVE_FILE_NAME } from '../config';
 // ── Offline persistence helpers ───────────────────────────────────────────────
 const CACHE_KEY  = 'food_ratings_data_cache_v1';
 const QUEUE_KEY  = 'food_ratings_op_queue_v1';
+// Write-ahead log: ops persisted before their Drive write so a page reload can replay them.
+const WAL_KEY    = 'food_ratings_wal_v1';
 
 function saveCache(data) {
   // Try saving the full dataset (combined + changelog).
@@ -43,6 +45,12 @@ function saveQueue(q) {
   try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch {}
 }
 function enqueue(op) { const q = loadQueue(); q.push(op); saveQueue(q); }
+function loadWal() {
+  try { return JSON.parse(localStorage.getItem(WAL_KEY) || '[]'); } catch { return []; }
+}
+function saveWal(ops) {
+  try { localStorage.setItem(WAL_KEY, JSON.stringify(ops)); } catch {}
+}
 function isNetworkError(err) {
   return err instanceof TypeError && err.message.toLowerCase().includes('fetch');
 }
@@ -161,7 +169,13 @@ export function useData(isAuthenticated) {
 
         applyResult(data);
         setIsOffline(false);
-        // Flush any queued ops from a previous offline session
+        // Replay any Drive writes that were in-flight when the page last reloaded.
+        const wal = loadWal();
+        if (wal.length > 0) {
+          saveWal([]);
+          const walOps = wal.map(({ _walId, ...op }) => op);
+          saveQueue([...walOps, ...loadQueue()]);
+        }
         if (loadQueue().length) flushQueue(id);
       } catch (err) {
         if (myCount !== initCounterRef.current) return;
@@ -220,6 +234,7 @@ export function useData(isAuthenticated) {
         if      (op.type === 'add')         result = await dataService.addEntry(id, op.entries);
         else if (op.type === 'addEntries')  result = await dataService.addEntries(id, op.entries);
         else if (op.type === 'addCategory') result = await dataService.addCategory(id, op.categoryData);
+        else if (op.type === 'addWithLinks') result = await dataService.addEntriesWithLinks(id, op.entries, op.existingUuids);
         else if (op.type === 'modify')      result = await dataService.modifyEntry(id, op.uuid, op.updates);
         else if (op.type === 'delete')      result = await dataService.deleteEntry(id, op.uuid);
         if (result?.data) applyResult(result.data);
@@ -320,6 +335,14 @@ export function useData(isAuthenticated) {
       return;
     }
 
+    // Write-ahead log: persist before Drive write so a page reload can replay it.
+    const walId = queueOp ? `${Date.now()}_${Math.random()}` : null;
+    if (walId) {
+      const wal = loadWal();
+      wal.push({ ...queueOp, _walId: walId });
+      saveWal(wal);
+    }
+
     setSyncing(true);
     setSyncError(null);
 
@@ -329,13 +352,14 @@ export function useData(isAuthenticated) {
     driveWriteQueueRef.current = driveWriteQueueRef.current
       .then(() => fn(id))
       .then(() => {
-        // Don't apply Drive result — local state is already correct.
-        // Drive sync just persists. Applying would overwrite locally-added
-        // entries (e.g. a new category) that haven't synced to Drive yet.
+        // Drive write succeeded — remove from WAL.
+        if (walId) saveWal(loadWal().filter((o) => o._walId !== walId));
       })
       .catch((err) => {
         if (isNetworkError(err)) {
           setIsOffline(true);
+          // Move from WAL to persistent offline queue.
+          if (walId) saveWal(loadWal().filter((o) => o._walId !== walId));
           if (queueOp) {
             enqueue(queueOp);
             setPendingCount((n) => n + 1);
@@ -343,6 +367,7 @@ export function useData(isAuthenticated) {
           saveCache({ combined: combinedRef.current, changelog: changelogRef.current });
           setSyncError('Network error — change saved locally and will sync when back online.');
         } else {
+          if (walId) saveWal(loadWal().filter((o) => o._walId !== walId));
           setSyncError(err.message);
         }
       })
@@ -389,6 +414,7 @@ export function useData(isAuthenticated) {
     // subsequent updaters run deferred, so capturing values inside them is
     // unreliable. Using the ref guarantees newChangelog is always defined.
     const newChangelog = [...changelogRef.current, ...changes];
+    changelogRef.current = newChangelog;
 
     // Apply locally immediately; capture post-op combined for cache consistency
     let newCombined;
@@ -446,6 +472,7 @@ export function useData(isAuthenticated) {
     const allEntries = builtGroups.flat();
     const changes = allEntries.map((e) => createAdditionChange(e));
     const newChangelog = [...changelogRef.current, ...changes];
+    changelogRef.current = newChangelog;
 
     let newCombined;
     setCombined((prev) => {
@@ -488,6 +515,7 @@ export function useData(isAuthenticated) {
     };
     const change = createAdditionChange(entry);
     const newChangelog = [...changelogRef.current, change];
+    changelogRef.current = newChangelog;
 
     let newCombined;
     setCombined((prev) => {
@@ -514,10 +542,11 @@ export function useData(isAuthenticated) {
   const modifyEntry = useCallback((uuid, updates) => {
     const now = Date.now();
     const changes = Object.entries(updates).map(([field, value]) =>
-      createModificationChange(uuid, field, String(value ?? ''))
+      createModificationChange(uuid, field, Array.isArray(value) ? value.join('|') : String(value ?? ''))
     );
     changes.forEach((c, i) => { c.dateOfChange = now + i; });
     const newChangelog = [...changelogRef.current, ...changes];
+    changelogRef.current = newChangelog;
 
     let newCombined;
     setCombined((prev) => {
@@ -544,6 +573,7 @@ export function useData(isAuthenticated) {
   const deleteEntry = useCallback((uuid) => {
     const change = createDeletionChange(uuid);
     const newChangelog = [...changelogRef.current, change];
+    changelogRef.current = newChangelog;
 
     let newCombined;
     setCombined((prev) => {
@@ -587,6 +617,84 @@ export function useData(isAuthenticated) {
     []
   );
 
+  /**
+   * Add entries and atomically cross-link them with existing entries (identicals).
+   * Everything — addition changes + identicals modification changes — goes through
+   * a single Drive write so a mid-sync reload can't leave the entries unlinked or missing.
+   */
+  const addEntriesWithLinks = useCallback((entryDataArray, existingUuids = []) => {
+    const currentCombined = combinedRef.current;
+    const raw = Array.isArray(entryDataArray) ? entryDataArray : [entryDataArray];
+    const now = Date.now();
+
+    const entries = raw.map((d) => ({
+      uuid: uuidv4(),
+      entryType: 'food',
+      identicals: [],
+      categories: [],
+      ratingCategory: '',
+      restaurantName: '',
+      specifier: '',
+      location: '',
+      score: null,
+      dateRated: Date.now(),
+      additionalInfo: '',
+      picture: '',
+      ...d,
+      categories: computeCategories(d.ratingCategory || '', currentCombined),
+    }));
+
+    const newUuids = entries.map((e) => e.uuid);
+    if (entries.length > 1) {
+      entries.forEach((e, i) => { e.identicals = newUuids.filter((_, j) => j !== i); });
+    }
+    if (existingUuids.length > 0) {
+      entries.forEach((e) => { e.identicals = [...e.identicals, ...existingUuids]; });
+    }
+
+    const addChanges = entries.map((e) => createAdditionChange(e));
+    let changeIdx = addChanges.length;
+
+    // Pre-compute modification changes for existing entries using current local state.
+    const existingModChanges = existingUuids.flatMap((existingUuid) => {
+      const existing = currentCombined.get(existingUuid);
+      if (!existing) return [];
+      const updated = [...new Set([...(existing.identicals || []), ...newUuids])];
+      const change = createModificationChange(existingUuid, 'identicals', updated.join('|'));
+      change.dateOfChange = now + changeIdx++;
+      return [{ existingUuid, updated, change }];
+    });
+
+    const newChangelog = [
+      ...changelogRef.current,
+      ...addChanges,
+      ...existingModChanges.map((m) => m.change),
+    ];
+    changelogRef.current = newChangelog;
+
+    let newCombined;
+    setCombined((prev) => {
+      const next = new Map(prev);
+      entries.forEach((e) => next.set(e.uuid, e));
+      existingModChanges.forEach(({ existingUuid, updated }) => {
+        const ex = next.get(existingUuid);
+        if (ex) next.set(existingUuid, { ...ex, identicals: updated });
+      });
+      newCombined = next;
+      return next;
+    });
+    setChangelog((prev) => [...prev, ...addChanges, ...existingModChanges.map((m) => m.change)]);
+
+    withSyncBackground(
+      (id) => dataService.addEntriesWithLinks(id, entries, existingUuids),
+      { type: 'addWithLinks', entries, existingUuids },
+      newCombined,
+      newChangelog,
+    );
+
+    return entries;
+  }, []);
+
   // ── Derived ─────────────────────────────────────────────────────────────────
 
   const categories  = Array.from(combined.values()).filter((e) => e.entryType === 'category');
@@ -596,7 +704,7 @@ export function useData(isAuthenticated) {
     combined, changelog, categories, foodEntries,
     fileId, folderId, loading, syncing, syncError, setSyncError,
     isOffline, pendingCount,
-    addEntry, addEntryGroups, addCategory, modifyEntry, deleteEntry,
+    addEntry, addEntryGroups, addEntriesWithLinks, addCategory, modifyEntry, deleteEntry,
     importCsv, exportCsv,
   };
 }
