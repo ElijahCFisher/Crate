@@ -167,13 +167,39 @@ export function useData(isAuthenticated) {
           }
         }
 
+        // Merge pending ops (WAL + queue) into Drive data before applying to
+        // local state. Without this, entries added before init() sets fileId
+        // are queued but never written to Drive yet — applyResult(data) would
+        // wipe them from the UI until flushQueue restores them seconds later.
+        const wal = loadWal();
+        const walOps = wal.map(({ _walId, ...op }) => op);
+        for (const op of [...walOps, ...loadQueue()]) {
+          if (op.type === 'add' || op.type === 'addEntries' || op.type === 'addWithLinks') {
+            for (const e of (op.entries || [])) {
+              if (!data.combined.has(e.uuid)) data.combined.set(e.uuid, e);
+            }
+          } else if (op.type === 'addCategory') {
+            const cd = op.categoryData;
+            if (cd?.uuid && !data.combined.has(cd.uuid)) {
+              data.combined.set(cd.uuid, {
+                uuid: cd.uuid, entryType: 'category', identicals: [], categories: [],
+                restaurantName: cd.name || '', ratingCategory: cd.ratingCategory || '',
+                score: cd.score ?? null, dateRated: cd.dateRated ?? null,
+                additionalInfo: cd.additionalInfo || '', picture: '', specifier: '', location: '',
+              });
+            }
+          } else if (op.type === 'modify') {
+            const e = data.combined.get(op.uuid);
+            if (e) data.combined.set(op.uuid, { ...e, ...op.updates });
+          } else if (op.type === 'delete') {
+            data.combined.delete(op.uuid);
+          }
+        }
         applyResult(data);
         setIsOffline(false);
         // Replay any Drive writes that were in-flight when the page last reloaded.
-        const wal = loadWal();
         if (wal.length > 0) {
           saveWal([]);
-          const walOps = wal.map(({ _walId, ...op }) => op);
           saveQueue([...walOps, ...loadQueue()]);
         }
         if (loadQueue().length) flushQueue(id);
