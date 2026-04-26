@@ -33,18 +33,31 @@ function parseFieldValue(fieldName, value) {
 
 /**
  * Core retry loop: read Drive → apply → write with version check.
+ * Reads/writes combined and changelog files in parallel.
  * Returns { data: { combined, changelog }, ...extra } where extra comes from caller.
  */
-async function applyChanges(fileId, changes, applyFn) {
+async function applyChanges({ combinedFileId, changelogFileId }, changes, applyFn) {
   const deadline = Date.now() + SYNC_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const { content, etag } = await driveService.readFile(fileId);
-    const data = csvService.parse(content);
+    const [
+      { content: combinedContent, etag: combinedEtag },
+      { content: changelogContent, etag: changelogEtag },
+    ] = await Promise.all([
+      driveService.readFile(combinedFileId),
+      driveService.readFile(changelogFileId),
+    ]);
+    const data = {
+      combined: csvService.parseCombined(combinedContent),
+      changelog: csvService.parseChangelog(changelogContent),
+    };
     for (const change of changes) data.changelog.push(change);
     const extra = applyFn(data) ?? {};
-    const result = await driveService.writeFile(fileId, csvService.generate(data), etag);
-    if (result.ok) return { data, ...extra };
-    if (result.status === 412) { await sleep(1000); continue; }
+    const [combinedResult, changelogResult] = await Promise.all([
+      driveService.writeFile(combinedFileId, csvService.generateCombined(data), combinedEtag),
+      driveService.writeFile(changelogFileId, csvService.generateChangelog(data), changelogEtag),
+    ]);
+    if (combinedResult.ok && changelogResult.ok) return { data, ...extra };
+    if (combinedResult.status === 412 || changelogResult.status === 412) { await sleep(1000); continue; }
     throw new Error('Drive write failed unexpectedly.');
   }
   throw new Error('Sync failed after 30 seconds. Please try again.');
@@ -72,7 +85,7 @@ const ENTRY_DEFAULTS = {
  * the live combined map inside the retry loop.
  * Returns { data, entries }.
  */
-export async function addEntry(fileId, entryDataArray) {
+export async function addEntry(fileIds, entryDataArray) {
   const raw = Array.isArray(entryDataArray) ? entryDataArray : [entryDataArray];
   const entries = raw.map((d) => ({ ...ENTRY_DEFAULTS, uuid: uuidv4(), dateRated: Date.now(), ...d }));
 
@@ -83,7 +96,7 @@ export async function addEntry(fileId, entryDataArray) {
   }
 
   const changes = entries.map((e) => createAdditionChange(e));
-  return applyChanges(fileId, changes, (data) => {
+  return applyChanges(fileIds, changes, (data) => {
     for (const e of entries) {
       // Do NOT recompute categories here — use the pre-computed value from local
       // state. A newly created parent category may not be in Drive's combined map
@@ -100,7 +113,7 @@ export async function addEntry(fileId, entryDataArray) {
  *   { name, ratingCategory?, score?, dateRated?, additionalInfo?, uuid? }
  * Returns { data, entry }.
  */
-export async function addCategory(fileId, categoryData) {
+export async function addCategory(fileIds, categoryData) {
   const entry = {
     ...ENTRY_DEFAULTS,
     entryType: 'category',
@@ -112,7 +125,7 @@ export async function addCategory(fileId, categoryData) {
     additionalInfo: categoryData.additionalInfo || '',
   };
   const change = createAdditionChange(entry);
-  return applyChanges(fileId, [change], (data) => {
+  return applyChanges(fileIds, [change], (data) => {
     entry.categories = computeCategories(entry.ratingCategory, data.combined);
     data.combined.set(entry.uuid, entry);
     return { entry };
@@ -123,14 +136,14 @@ export async function addCategory(fileId, categoryData) {
  * Modify an entry. `updates` contains only the fields that actually changed
  * (diff computed in UI). Recomputes ancestor `categories` if ratingCategory changed.
  */
-export async function modifyEntry(fileId, entryUuid, updates) {
+export async function modifyEntry(fileIds, entryUuid, updates) {
   const now = Date.now();
   const changes = Object.entries(updates).map(([field, value]) =>
     createModificationChange(entryUuid, field, Array.isArray(value) ? value.join('|') : String(value ?? ''))
   );
   changes.forEach((c, i) => { c.dateOfChange = now + i; });
 
-  return applyChanges(fileId, changes, (data) => {
+  return applyChanges(fileIds, changes, (data) => {
     const entry = data.combined.get(entryUuid);
     if (!entry) return {};
     let updated = { ...entry };
@@ -148,9 +161,9 @@ export async function modifyEntry(fileId, entryUuid, updates) {
   });
 }
 
-export async function deleteEntry(fileId, entryUuid) {
+export async function deleteEntry(fileIds, entryUuid) {
   const change = createDeletionChange(entryUuid);
-  return applyChanges(fileId, [change], (data) => {
+  return applyChanges(fileIds, [change], (data) => {
     if (isLatestChangeForField(data.changelog, change)) data.combined.delete(entryUuid);
     return {};
   });
@@ -161,13 +174,13 @@ export async function deleteEntry(fileId, entryUuid) {
  * `entries` must already have UUIDs and internal identicals set (cross-links
  * within the new group). `existingUuids` are existing entries to link bidirectionally.
  */
-export async function addEntriesWithLinks(fileId, entries, existingUuids = []) {
+export async function addEntriesWithLinks(fileIds, entries, existingUuids = []) {
   const addChanges = entries.map((e) => createAdditionChange(e));
   const now = Date.now();
   let changeIdx = addChanges.length;
   const newUuids = entries.map((e) => e.uuid);
 
-  return applyChanges(fileId, addChanges, (data) => {
+  return applyChanges(fileIds, addChanges, (data) => {
     for (const e of entries) data.combined.set(e.uuid, e);
     if (existingUuids.length === 0) return { entries };
 
@@ -199,10 +212,10 @@ export async function addEntriesWithLinks(fileId, entries, existingUuids = []) {
  * Write a flat list of pre-built entries in one atomic applyChanges pass.
  * Callers are responsible for cross-linking identicals before calling this.
  */
-export async function addEntries(fileId, entries) {
+export async function addEntries(fileIds, entries) {
   const normalized = entries.map((d) => ({ ...ENTRY_DEFAULTS, ...d }));
   const changes = normalized.map((e) => createAdditionChange(e));
-  return applyChanges(fileId, changes, (data) => {
+  return applyChanges(fileIds, changes, (data) => {
     for (const e of normalized) data.combined.set(e.uuid, e);
     return {};
   });
@@ -212,10 +225,10 @@ export async function addEntries(fileId, entries) {
  * Batch-import entries that already have UUIDs and pre-computed ancestor chains.
  * Skips entries whose UUID already exists in combined.
  */
-export async function importEntries(fileId, entries, newCategories) {
+export async function importEntries(fileIds, entries, newCategories) {
   const allEntries = [...newCategories, ...entries];
   const changes = allEntries.map((e) => createAdditionChange(e, 'imported from CSV'));
-  return applyChanges(fileId, changes, (data) => {
+  return applyChanges(fileIds, changes, (data) => {
     for (const e of allEntries) {
       if (!data.combined.has(e.uuid)) {
         // Use pre-computed categories from importFromLegacyCsv — do NOT recompute

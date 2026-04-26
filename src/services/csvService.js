@@ -16,6 +16,40 @@ const CHANGELOG_FIELDS = [
   'Picture', 'Entry Type', 'Change Method', 'Date of Change',
 ];
 
+// ── Split-file parse / generate (two separate Drive files) ───────────────────
+
+export function parseCombined(csvText) {
+  const combined = new Map();
+  if (!csvText || csvText.trim() === '') return combined;
+  const { data } = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+  for (const row of data) {
+    const entry = rowToEntry(row);
+    if (entry.uuid) combined.set(entry.uuid, entry);
+  }
+  return combined;
+}
+
+export function parseChangelog(csvText) {
+  const changelog = [];
+  if (!csvText || csvText.trim() === '') return changelog;
+  const { data } = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+  for (const row of data) {
+    const change = rowToChange(row);
+    if (change.changeUuid) changelog.push(change);
+  }
+  return changelog;
+}
+
+export function generateCombined({ combined }) {
+  const rows = Array.from(combined.values()).map(entryToRow);
+  return Papa.unparse({ fields: COMBINED_FIELDS, data: rows });
+}
+
+export function generateChangelog({ changelog }) {
+  const rows = changelog.map(changeToRow);
+  return Papa.unparse({ fields: CHANGELOG_FIELDS, data: rows });
+}
+
 // ── Parsing ──────────────────────────────────────────────────────────────────
 
 export function parse(csvText) {

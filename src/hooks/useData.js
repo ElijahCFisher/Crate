@@ -10,7 +10,7 @@ import {
   createModificationChange,
   createDeletionChange,
 } from '../utils/changelogUtils';
-import { DRIVE_FOLDER_NAME, DRIVE_FILE_NAME } from '../config';
+import { DRIVE_FOLDER_NAME, DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME } from '../config';
 
 // ── Offline persistence helpers ───────────────────────────────────────────────
 const CACHE_KEY  = 'food_ratings_data_cache_v1';
@@ -58,19 +58,21 @@ function isNetworkError(err) {
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useData(isAuthenticated) {
-  const [combined, setCombined]     = useState(new Map());
-  const [changelog, setChangelog]   = useState([]);
-  const [fileId, setFileId]         = useState(null);
-  const [folderId, setFolderId]     = useState(null);
+  const [combined, setCombined]         = useState(new Map());
+  const [changelog, setChangelog]       = useState([]);
+  const [combinedFileId, setCombinedFileId] = useState(null);
+  const [changelogFileId, setChangelogFileId] = useState(null);
+  const [folderId, setFolderId]         = useState(null);
   const [loading, setLoading]       = useState(false);
   const [syncing, setSyncing]       = useState(false);
   const [syncError, setSyncError]   = useState(null);
   const [pendingCount, setPendingCount] = useState(() => loadQueue().length);
   const [isOffline, setIsOffline]   = useState(!navigator.onLine);
 
-  const fileIdRef    = useRef(fileId);
-  const combinedRef  = useRef(combined);
-  const changelogRef = useRef(changelog);
+  const combinedFileIdRef  = useRef(null);
+  const changelogFileIdRef = useRef(null);
+  const combinedRef        = useRef(combined);
+  const changelogRef       = useRef(changelog);
   // isOfflineRef mirrors isOffline so stale useCallback closures always read
   // the current value (avoids trying a Drive call when we know we're offline).
   const isOfflineRef = useRef(!navigator.onLine);
@@ -86,10 +88,11 @@ export function useData(isAuthenticated) {
   // Serializes all background Drive writes so concurrent saves (e.g. multiple
   // entry groups submitted at once) never race and overwrite each other.
   const driveWriteQueueRef = useRef(Promise.resolve());
-  useEffect(() => { fileIdRef.current    = fileId;    }, [fileId]);
-  useEffect(() => { combinedRef.current  = combined;  }, [combined]);
-  useEffect(() => { changelogRef.current = changelog; }, [changelog]);
-  useEffect(() => { isOfflineRef.current = isOffline; }, [isOffline]);
+  useEffect(() => { combinedFileIdRef.current  = combinedFileId;  }, [combinedFileId]);
+  useEffect(() => { changelogFileIdRef.current = changelogFileId; }, [changelogFileId]);
+  useEffect(() => { combinedRef.current        = combined;        }, [combined]);
+  useEffect(() => { changelogRef.current       = changelog;       }, [changelog]);
+  useEffect(() => { isOfflineRef.current       = isOffline;       }, [isOffline]);
 
   // ── Apply Drive result to local state ───────────────────────────────────────
 
@@ -107,8 +110,10 @@ export function useData(isAuthenticated) {
       const cached = loadCache();
       setCombined(cached ? new Map(cached.combined) : new Map());
       setChangelog(cached ? [...cached.changelog] : []);
-      setFileId(null);
-      fileIdRef.current = null;
+      setCombinedFileId(null);
+      setChangelogFileId(null);
+      combinedFileIdRef.current = null;
+      changelogFileIdRef.current = null;
       return;
     }
 
@@ -125,15 +130,53 @@ export function useData(isAuthenticated) {
       try {
         const resolvedFolderId = await driveService.findOrCreateFolder(DRIVE_FOLDER_NAME);
         setFolderId(resolvedFolderId);
-        const id = await driveService.findOrCreateFile(resolvedFolderId, DRIVE_FILE_NAME);
-        setFileId(id); fileIdRef.current = id;
-        const { content, etag } = await driveService.readFile(id);
+
+        const [combinedId, changelogId] = await Promise.all([
+          driveService.findOrCreateFile(resolvedFolderId, DRIVE_FILE_NAME),
+          driveService.findOrCreateFile(resolvedFolderId, DRIVE_CHANGELOG_FILE_NAME),
+        ]);
+        setCombinedFileId(combinedId);  combinedFileIdRef.current  = combinedId;
+        setChangelogFileId(changelogId); changelogFileIdRef.current = changelogId;
+
+        const [
+          { content: combinedContent, etag: combinedEtag },
+          { content: changelogContent, etag: changelogEtag },
+        ] = await Promise.all([
+          driveService.readFile(combinedId),
+          driveService.readFile(changelogId),
+        ]);
 
         // Another init() started while we were awaiting — its result is newer,
         // so silently abandon this one.
         if (myCount !== initCounterRef.current) return;
 
-        const data = csvService.parse(content);
+        // ── Migration: old single-file format → two separate files ───────────
+        // The old combined file contained both sections separated by markers.
+        // Write changelog BEFORE combined. If the combined write fails later,
+        // the combined file retains its old format so migration retries safely
+        // on the next load (changelog write is idempotent).
+        if (combinedContent.includes('SECTION,COMBINED')) {
+          const migrated = csvService.parse(combinedContent);
+          const clResult = await driveService.writeFile(
+            changelogId, csvService.generateChangelog(migrated), changelogEtag,
+          );
+          if (myCount !== initCounterRef.current) return;
+          if (!clResult.ok) throw new Error('Migration failed (changelog). Please refresh.');
+          const cmResult = await driveService.writeFile(
+            combinedId, csvService.generateCombined(migrated), combinedEtag,
+          );
+          if (myCount !== initCounterRef.current) return;
+          if (!cmResult.ok) throw new Error('Migration failed (combined). Please refresh.');
+          applyResult(migrated);
+          setIsOffline(false);
+          if (loadQueue().length) flushQueue(combinedId, changelogId);
+          return;
+        }
+
+        const data = {
+          combined:  csvService.parseCombined(combinedContent),
+          changelog: csvService.parseChangelog(changelogContent),
+        };
 
         // ── First-time sync: Drive is empty but cache has data ────────────────
         // This happens on first sign-in, if the Drive file was deleted, or if
@@ -147,14 +190,13 @@ export function useData(isAuthenticated) {
             // changelog entries (changeMethod, original timestamps) exactly as
             // they were. This handles: first sign-in, CSV deleted from Drive,
             // or Drive file lost.
-            const writeResult = await driveService.writeFile(
-              id,
-              csvService.generate(cached),
-              etag,
-            );
+            const [cmResult, clResult] = await Promise.all([
+              driveService.writeFile(combinedId,  csvService.generateCombined(cached),  combinedEtag),
+              driveService.writeFile(changelogId, csvService.generateChangelog(cached), changelogEtag),
+            ]);
             if (myCount !== initCounterRef.current) return;
-            if (!writeResult.ok) {
-              throw new Error(`Failed to seed Drive from cache (HTTP ${writeResult.status}).`);
+            if (!cmResult.ok || !clResult.ok) {
+              throw new Error('Failed to seed Drive from cache.');
             }
             applyResult(cached);
             setIsOffline(false);
@@ -202,7 +244,7 @@ export function useData(isAuthenticated) {
           saveWal([]);
           saveQueue([...walOps, ...loadQueue()]);
         }
-        if (loadQueue().length) flushQueue(id);
+        if (loadQueue().length) flushQueue(combinedId, changelogId);
       } catch (err) {
         if (myCount !== initCounterRef.current) return;
         const cached = loadCache();
@@ -228,10 +270,11 @@ export function useData(isAuthenticated) {
     function handleOnline() {
       setIsOffline(false);
       setSyncError(null);
-      const id = fileIdRef.current;
-      if (id) {
-        // fileId already set — went offline mid-session, just flush the queue.
-        flushQueue(id);
+      const cid = combinedFileIdRef.current;
+      const lid = changelogFileIdRef.current;
+      if (cid && lid) {
+        // fileIds already set — went offline mid-session, just flush the queue.
+        flushQueue(cid, lid);
       } else if (initRef.current) {
         // Page was loaded while offline; init() never got a fileId.
         // Re-run init now — it will load Drive data and flush the queue.
@@ -249,7 +292,8 @@ export function useData(isAuthenticated) {
 
   // ── Queue flush ─────────────────────────────────────────────────────────────
 
-  async function flushQueue(id) {
+  async function flushQueue(combinedId, changelogId) {
+    const fids = { combinedFileId: combinedId, changelogFileId: changelogId };
     const queue = loadQueue();
     if (!queue.length) return;
     setSyncing(true);
@@ -257,12 +301,12 @@ export function useData(isAuthenticated) {
     for (const op of queue) {
       try {
         let result;
-        if      (op.type === 'add')         result = await dataService.addEntry(id, op.entries);
-        else if (op.type === 'addEntries')  result = await dataService.addEntries(id, op.entries);
-        else if (op.type === 'addCategory') result = await dataService.addCategory(id, op.categoryData);
-        else if (op.type === 'addWithLinks') result = await dataService.addEntriesWithLinks(id, op.entries, op.existingUuids);
-        else if (op.type === 'modify')      result = await dataService.modifyEntry(id, op.uuid, op.updates);
-        else if (op.type === 'delete')      result = await dataService.deleteEntry(id, op.uuid);
+        if      (op.type === 'add')         result = await dataService.addEntry(fids, op.entries);
+        else if (op.type === 'addEntries')  result = await dataService.addEntries(fids, op.entries);
+        else if (op.type === 'addCategory') result = await dataService.addCategory(fids, op.categoryData);
+        else if (op.type === 'addWithLinks') result = await dataService.addEntriesWithLinks(fids, op.entries, op.existingUuids);
+        else if (op.type === 'modify')      result = await dataService.modifyEntry(fids, op.uuid, op.updates);
+        else if (op.type === 'delete')      result = await dataService.deleteEntry(fids, op.uuid);
         if (result?.data) applyResult(result.data);
         else if (result?.combined) applyResult(result);
         remaining = remaining.filter((o) => o !== op);
@@ -286,8 +330,8 @@ export function useData(isAuthenticated) {
   // Callers should `await withSync(...)`.
 
   async function withSync(fn, queueOp, localApply) {
-    const id = fileIdRef.current;
-    if (!id && !isOffline) throw new Error('No file loaded');
+    const fids = { combinedFileId: combinedFileIdRef.current, changelogFileId: changelogFileIdRef.current };
+    if (!fids.combinedFileId && !isOffline) throw new Error('No file loaded');
 
     if (!navigator.onLine || isOffline) {
       if (localApply) localApply();
@@ -301,7 +345,7 @@ export function useData(isAuthenticated) {
 
     setSyncing(true); setSyncError(null);
     try {
-      const result = await fn(id);
+      const result = await fn(fids);
       const fileData = result?.combined ? result : result?.data;
       if (fileData) applyResult(fileData);
       return result;
@@ -349,8 +393,8 @@ export function useData(isAuthenticated) {
       return;
     }
 
-    const id = fileIdRef.current;
-    if (!id) {
+    const fids = { combinedFileId: combinedFileIdRef.current, changelogFileId: changelogFileIdRef.current };
+    if (!fids.combinedFileId) {
       // No Drive file yet — user isn't signed in, or init() hasn't completed.
       // Enqueue the op so it syncs automatically once we have a file ID
       // (i.e. after sign-in finishes and init() runs flushQueue).
@@ -376,7 +420,7 @@ export function useData(isAuthenticated) {
     // TOCTOU race where two concurrent writes both pass the version check then
     // the last writer silently overwrites the first.
     driveWriteQueueRef.current = driveWriteQueueRef.current
-      .then(() => fn(id))
+      .then(() => fn(fids))
       .then(() => {
         // Drive write succeeded — remove from WAL.
         if (walId) saveWal(loadWal().filter((o) => o._walId !== walId));
@@ -454,7 +498,7 @@ export function useData(isAuthenticated) {
 
     // Background Drive sync
     withSyncBackground(
-      (id) => dataService.addEntry(id, entries),
+      (fids) => dataService.addEntry(fids, entries),
       { type: 'add', entries },
       newCombined,
       newChangelog,
@@ -510,7 +554,7 @@ export function useData(isAuthenticated) {
     setChangelog((prev) => [...prev, ...changes]);
 
     withSyncBackground(
-      (id) => dataService.addEntries(id, allEntries),
+      (fids) => dataService.addEntries(fids, allEntries),
       { type: 'addEntries', entries: allEntries },
       newCombined,
       newChangelog,
@@ -553,7 +597,7 @@ export function useData(isAuthenticated) {
 
     // Background Drive sync
     withSyncBackground(
-      (id) => dataService.addCategory(id, { ...categoryData, uuid: entry.uuid }),
+      (fids) => dataService.addCategory(fids, { ...categoryData, uuid: entry.uuid }),
       { type: 'addCategory', categoryData: { ...categoryData, uuid: entry.uuid } },
       newCombined,
       newChangelog,
@@ -586,7 +630,7 @@ export function useData(isAuthenticated) {
 
     // Background Drive sync
     withSyncBackground(
-      (id) => dataService.modifyEntry(id, uuid, updates),
+      (fids) => dataService.modifyEntry(fids, uuid, updates),
       { type: 'modify', uuid, updates },
       newCombined,
       newChangelog,
@@ -612,7 +656,7 @@ export function useData(isAuthenticated) {
 
     // Background Drive sync
     withSyncBackground(
-      (id) => dataService.deleteEntry(id, uuid),
+      (fids) => dataService.deleteEntry(fids, uuid),
       { type: 'delete', uuid },
       newCombined,
       newChangelog,
@@ -623,15 +667,15 @@ export function useData(isAuthenticated) {
 
   const importCsv = useCallback(async (csvText) => {
     const fmt = detectImportFormat(csvText);
-    await withSync((id) => {
+    await withSync((fids) => {
       if (fmt === 'app') {
         const { combined: imp } = csvService.parse(csvText);
         const cats    = Array.from(imp.values()).filter((e) => e.entryType === 'category');
         const entries = Array.from(imp.values()).filter((e) => e.entryType === 'food');
-        return dataService.importEntries(id, entries, cats);
+        return dataService.importEntries(fids, entries, cats);
       } else {
         const { entries, newCategories } = importFromLegacyCsv(csvText, combinedRef.current);
-        return dataService.importEntries(id, entries, newCategories);
+        return dataService.importEntries(fids, entries, newCategories);
       }
     }, null, null);
   }, []);
@@ -712,7 +756,7 @@ export function useData(isAuthenticated) {
     setChangelog((prev) => [...prev, ...addChanges, ...existingModChanges.map((m) => m.change)]);
 
     withSyncBackground(
-      (id) => dataService.addEntriesWithLinks(id, entries, existingUuids),
+      (fids) => dataService.addEntriesWithLinks(fids, entries, existingUuids),
       { type: 'addWithLinks', entries, existingUuids },
       newCombined,
       newChangelog,
@@ -728,7 +772,7 @@ export function useData(isAuthenticated) {
 
   return {
     combined, changelog, categories, foodEntries,
-    fileId, folderId, loading, syncing, syncError, setSyncError,
+    fileId: combinedFileId, folderId, loading, syncing, syncError, setSyncError,
     isOffline, pendingCount,
     addEntry, addEntryGroups, addEntriesWithLinks, addCategory, modifyEntry, deleteEntry,
     importCsv, exportCsv,
