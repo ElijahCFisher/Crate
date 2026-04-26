@@ -8,4 +8,4 @@ export const SETTINGS_FILE_NAME = 'SettingsEtc.json';
 
 // Full scope string used by the auth-code login flow (includes openid + drive)
 export const GOOGLE_AUTH_SCOPE =
-  'openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';
+  'openid email profile https://www.googleapis.com/auth/drive';

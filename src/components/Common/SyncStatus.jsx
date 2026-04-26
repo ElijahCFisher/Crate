@@ -17,7 +17,7 @@ import CloseIcon from '@mui/icons-material/Close';
 function isAuthErrorMessage(msg) {
   return (
     msg === 'Not authenticated' ||
-    /^Drive (API error|write failed) 401/.test(msg)
+    /^Drive (API error|write failed) 40[13]/.test(msg)
   );
 }
 

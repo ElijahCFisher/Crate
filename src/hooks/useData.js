@@ -247,6 +247,10 @@ export function useData(isAuthenticated) {
         if (loadQueue().length) flushQueue(combinedId, changelogId);
       } catch (err) {
         if (myCount !== initCounterRef.current) return;
+        if (driveService.isAuthError(err)) {
+          setSyncError(err.message);
+          return;
+        }
         const cached = loadCache();
         if (cached) {
           setCombined(new Map(cached.combined));

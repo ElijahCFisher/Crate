@@ -14,7 +14,9 @@ export function isAuthError(err) {
   return (
     msg === 'Not authenticated' ||
     msg.startsWith('Drive API error 401') ||
-    msg.startsWith('Drive write failed 401')
+    msg.startsWith('Drive write failed 401') ||
+    msg.startsWith('Drive API error 403') ||
+    msg.startsWith('Drive write failed 403')
   );
 }
 
