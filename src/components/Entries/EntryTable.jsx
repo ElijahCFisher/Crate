@@ -90,8 +90,8 @@ export default function EntryTable({
   readOnly = false,
 }) {
   const [filters, setFilters] = useState(() => loadPrefs()?.filters || [makeDefaultFilter()]);
-  const [order, setOrder] = useState(() => loadPrefs()?.order || 'asc');
-  const [orderBy, setOrderBy] = useState(() => loadPrefs()?.orderBy || 'restaurantName');
+  const [order, setOrder] = useState(() => loadPrefs()?.order || 'desc');
+  const [orderBy, setOrderBy] = useState(() => loadPrefs()?.orderBy || 'dateRated');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(() => loadPrefs()?.rowsPerPage || 20);
 
@@ -171,9 +171,9 @@ export default function EntryTable({
     if (uuidFilterValue) {
       for (const group of result) {
         if (!group.others.length) continue;
-        if (!group.primary.uuid.toLowerCase().includes(uuidFilterValue)) {
+        if (group.primary.uuid.toLowerCase() !== uuidFilterValue) {
           const better = group.others.find((o) =>
-            o.uuid.toLowerCase().includes(uuidFilterValue)
+            o.uuid.toLowerCase() === uuidFilterValue
           );
           if (better) {
             group.others = [group.primary, ...group.others.filter((o) => o !== better)];

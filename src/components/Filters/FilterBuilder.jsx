@@ -80,15 +80,39 @@ function matchFilter(entry, filter, categories) {
   // Build catMap once per filter call for fast UUID → name lookup
   const catMap = new Map(categories.map((c) => [c.uuid, c.restaurantName]));
 
+  // UUID field: exact match only (no partial substring matching)
+  if (field === 'uuid') {
+    const uuid = String(entry.uuid ?? '');
+    if (op === 'isEmpty') return !uuid.trim();
+    if (op === 'isNotEmpty') return !!uuid.trim();
+    const h = caseSensitive ? uuid : uuid.toLowerCase();
+    const n = caseSensitive ? value : value.toLowerCase();
+    if (op === 'notContains') return h !== n;
+    return h === n;
+  }
+
+  if (field === 'any') {
+    if (op === 'isEmpty' || op === 'isNotEmpty') {
+      const rawStr = [entry.restaurantName, entry.specifier, entry.location, entry.additionalInfo,
+        allCatNamesStr(entry, catMap), entry.score != null ? String(entry.score) : ''].join(' ');
+      return op === 'isEmpty' ? !rawStr.trim() : !!rawStr.trim();
+    }
+    // Check all normal fields first
+    const dataStr = [entry.restaurantName, entry.specifier, entry.location, entry.additionalInfo,
+      allCatNamesStr(entry, catMap), entry.score != null ? String(entry.score) : ''].join(' ');
+    const dataMatch = testString(dataStr, op, value, caseSensitive, useRegex);
+    // UUID: exact match only in normal mode, regex match in regex mode
+    const uuid = String(entry.uuid ?? '');
+    const uuidMatch = useRegex
+      ? testString(uuid, op, value, caseSensitive, useRegex)
+      : (caseSensitive ? uuid : uuid.toLowerCase()) === (caseSensitive ? value : value.toLowerCase());
+    if (op === 'notContains') return dataMatch && !uuidMatch;
+    return dataMatch || uuidMatch;
+  }
+
   const rawStr =
-    field === 'any'
-      ? [entry.restaurantName, entry.specifier, entry.location, entry.additionalInfo,
-          allCatNamesStr(entry, catMap), entry.score != null ? String(entry.score) : '',
-          entry.uuid || ''].join(' ')
-      : field === 'ratingCategory'
+    field === 'ratingCategory'
       ? allCatNamesStr(entry, catMap)   // searches ALL ancestors, not just direct parent
-      : field === 'uuid'
-      ? String(entry.uuid ?? '')
       : String(entry[field] ?? '');
 
   if (op === 'isEmpty') return !rawStr.trim();

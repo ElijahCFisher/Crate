@@ -276,10 +276,12 @@ export default function AddEditEntryModal({
 
   const [form, setForm] = useState(entryToForm(null));
   const [showAdvanced, setShowAdvanced] = useState(showAdvancedByDefault);
+  const [formKey, setFormKey] = useState(0);
 
   useEffect(() => {
     if (open) {
       setShowAdvanced(showAdvancedByDefault);
+      setFormKey((k) => k + 1);
       if (!entry && initialEntries && initialEntries.length > 0) {
         setForm(entriesToForm(initialEntries));
       } else {
@@ -604,6 +606,7 @@ export default function AddEditEntryModal({
             {(isEdit || showAdvanced) && (
               <Grid item xs={12} sm={7}>
                 <CategorySelect
+                  key={`primary-cat-${formKey}`}
                   categories={categories}
                   value={form.primaryRating.ratingCategory}
                   newCategoryName={form.primaryRating.newCategoryName}
@@ -708,6 +711,7 @@ export default function AddEditEntryModal({
                     {showAdvanced && (
                       <Grid item xs={12} sm={7}>
                         <CategorySelect
+                          key={`additional-cat-${formKey}-${r.id}`}
                           categories={categories}
                           value={r.ratingCategory}
                           newCategoryName={r.newCategoryName}

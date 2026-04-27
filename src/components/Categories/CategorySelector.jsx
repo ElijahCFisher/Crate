@@ -4,7 +4,10 @@ import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
 import Tooltip from '@mui/material/Tooltip';
 
-const filter = createFilterOptions();
+// Filter only on the base category name, not on the "(ParentName)" disambiguator suffix
+const filter = createFilterOptions({
+  stringify: (option) => option.baseName ?? option.label,
+});
 
 /**
  * Build option list. When multiple categories share the same name, appends
@@ -23,7 +26,7 @@ function buildOptions(categories) {
       const parent = catMap.get(c.ratingCategory);
       if (parent?.restaurantName) label = `${label} (${parent.restaurantName})`;
     }
-    return { uuid: c.uuid, label };
+    return { uuid: c.uuid, label, baseName: c.restaurantName || '' };
   });
 }
 
