@@ -31,6 +31,24 @@ function parseFieldValue(fieldName, value) {
   }
 }
 
+function entryFromAdditionChange(change) {
+  return {
+    ...ENTRY_DEFAULTS,
+    uuid: change.entryUuid,
+    entryType: change.entryType || 'food',
+    identicals: change.identicals ?? [],
+    categories: change.categories ?? [],
+    ratingCategory: change.ratingCategory ?? '',
+    restaurantName: change.restaurantName ?? '',
+    specifier: change.specifier ?? '',
+    location: change.location ?? '',
+    score: change.score ?? null,
+    dateRated: change.dateRated ?? null,
+    additionalInfo: change.additionalInfo ?? '',
+    picture: change.picture ?? '',
+  };
+}
+
 /**
  * Core retry loop: read Drive → apply → write with version check.
  * Reads/writes combined and changelog files in parallel.
@@ -239,4 +257,69 @@ export async function importEntries(fileIds, entries, newCategories) {
     }
     return {};
   });
+}
+
+/**
+ * Replay a changelog-only CSV against the current data set.
+ * Existing change UUIDs are ignored so importing the same partial log is
+ * idempotent.
+ */
+export async function importChangelog(fileIds, incomingChanges) {
+  const deadline = Date.now() + SYNC_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const [
+      { content: combinedContent, etag: combinedEtag },
+      { content: changelogContent, etag: changelogEtag },
+    ] = await Promise.all([
+      driveService.readFile(fileIds.combinedFileId),
+      driveService.readFile(fileIds.changelogFileId),
+    ]);
+
+    const data = {
+      combined: csvService.parseCombined(combinedContent),
+      changelog: csvService.parseChangelog(changelogContent),
+    };
+
+    const existingChangeUuids = new Set(data.changelog.map((change) => change.changeUuid));
+    const changes = incomingChanges.filter((change) =>
+      change.changeUuid && change.entryUuid && !existingChangeUuids.has(change.changeUuid)
+    );
+
+    data.changelog.push(...changes);
+
+    for (const change of changes) {
+      if (change.changeType === 'addition') {
+        if (!data.combined.has(change.entryUuid)) {
+          const entry = entryFromAdditionChange(change);
+          if (entry.categories.length === 0 && entry.ratingCategory) {
+            entry.categories = computeCategories(entry.ratingCategory, data.combined);
+          }
+          data.combined.set(entry.uuid, entry);
+        }
+      } else if (change.changeType === 'modification') {
+        const entry = data.combined.get(change.entryUuid);
+        if (entry && isLatestChangeForField(data.changelog, change)) {
+          const updated = {
+            ...entry,
+            [change.fieldName]: parseFieldValue(change.fieldName, change.value),
+          };
+          if (change.fieldName === 'ratingCategory') {
+            updated.categories = computeCategories(updated.ratingCategory, data.combined);
+          }
+          data.combined.set(change.entryUuid, updated);
+        }
+      } else if (change.changeType === 'deletion') {
+        if (isLatestChangeForField(data.changelog, change)) data.combined.delete(change.entryUuid);
+      }
+    }
+
+    const [combinedResult, changelogResult] = await Promise.all([
+      driveService.writeFile(fileIds.combinedFileId, csvService.generateCombined(data), combinedEtag),
+      driveService.writeFile(fileIds.changelogFileId, csvService.generateChangelog(data), changelogEtag),
+    ]);
+    if (combinedResult.ok && changelogResult.ok) return { data, importedChanges: changes.length };
+    if (combinedResult.status === 412 || changelogResult.status === 412) { await sleep(1000); continue; }
+    throw new Error('Drive write failed unexpectedly.');
+  }
+  throw new Error('Sync failed after 30 seconds. Please try again.');
 }

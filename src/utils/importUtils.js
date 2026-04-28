@@ -6,12 +6,16 @@ import { computeCategories } from './changelogUtils';
 // ── Format detection ──────────────────────────────────────────────────────────
 
 /**
- * Sniff the CSV text and return 'app' or 'legacy'.
+ * Sniff the CSV text and return 'app', 'changelog', or 'legacy'.
  * App format starts with the SECTION,COMBINED marker.
+ * Changelog-only imports start with the changelog header row.
  */
 export function detectImportFormat(csvText) {
   const firstLine = (csvText || '').trim().split('\n')[0].trim();
-  return firstLine === 'SECTION,COMBINED' ? 'app' : 'legacy';
+  if (firstLine === 'SECTION,COMBINED') return 'app';
+  if (firstLine === 'SECTION,CHANGELOG') return 'changelog';
+  if (firstLine.startsWith('Entry UUID,Change UUID,Change Type')) return 'changelog';
+  return 'legacy';
 }
 
 // ── Legacy import ─────────────────────────────────────────────────────────────

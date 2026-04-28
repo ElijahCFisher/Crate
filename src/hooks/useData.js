@@ -677,6 +677,11 @@ export function useData(isAuthenticated) {
         const cats    = Array.from(imp.values()).filter((e) => e.entryType === 'category');
         const entries = Array.from(imp.values()).filter((e) => e.entryType === 'food');
         return dataService.importEntries(fids, entries, cats);
+      } else if (fmt === 'changelog') {
+        const changes = csvText.trim().startsWith('SECTION,CHANGELOG')
+          ? csvService.parse(csvText).changelog
+          : csvService.parseChangelog(csvText);
+        return dataService.importChangelog(fids, changes);
       } else {
         const { entries, newCategories } = importFromLegacyCsv(csvText, combinedRef.current);
         return dataService.importEntries(fids, entries, newCategories);

@@ -84,9 +84,9 @@ export default function ExportImportDialog({ open, onClose, exportCsv, onImportC
         {tab === 1 && (
           <Box sx={{ p: 3 }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Import a CSV file. Both the app's own export format and the original spreadsheet
-              format are supported — the format is detected automatically.
-              Existing entries with the same UUID will be skipped.
+              Import a CSV file. The app's export format, changelog-only exports, and the
+              original spreadsheet format are supported — the format is detected automatically.
+              Existing entries and already-imported changelog rows will be skipped.
             </Typography>
 
             <Button
