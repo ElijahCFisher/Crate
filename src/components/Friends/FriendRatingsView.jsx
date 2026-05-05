@@ -6,7 +6,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { readFile } from '../../services/driveService';
-import { parse } from '../../services/csvService';
+import { parseCombined } from '../../services/csvService';
 import EntryTable from '../Entries/EntryTable';
 
 export default function FriendRatingsView({ friend, onBack }) {
@@ -23,7 +23,7 @@ export default function FriendRatingsView({ friend, onBack }) {
     readFile(friend.fileId)
       .then(({ content }) => {
         if (cancelled) return;
-        const { combined } = parse(content);
+        const combined = parseCombined(content);
         const all = Array.from(combined.values());
         setCategories(all.filter((e) => e.entryType === 'category'));
         setFoodEntries(all.filter((e) => e.entryType === 'food'));
