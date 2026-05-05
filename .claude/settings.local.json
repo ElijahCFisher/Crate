@@ -13,7 +13,12 @@
       "Bash(tail -5 \"C:/Users/fishm/Downloads/\\(1\\) Food ratings - Combined \\(1\\).csv\")",
       "Bash(wc -l \"C:/Users/fishm/Downloads/\\(1\\) Food ratings - Combined \\(1\\).csv\")",
       "Bash(powershell.exe -Command \"Import-Csv ''C:\\\\Users\\\\fishm\\\\Downloads\\\\\\(1\\) Food ratings - Combined \\(1\\).csv'' | Where-Object { $_.''Brand Name'' -eq '''' } | Select-Object -First 30 | Format-Table\")",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(npm test *)",
+      "Bash(npm install *)",
+      "Bash(npm uninstall *)",
+      "Bash(npx vitest *)",
+      "Bash(node -e ' *)"
     ]
   }
 }
