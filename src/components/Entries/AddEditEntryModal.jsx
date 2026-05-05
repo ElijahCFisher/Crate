@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -6,6 +6,7 @@ import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
 import Grid from '@mui/material/Grid';
 import TextField from '@mui/material/TextField';
+import Autocomplete from '@mui/material/Autocomplete';
 import InputAdornment from '@mui/material/InputAdornment';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
@@ -262,6 +263,7 @@ export default function AddEditEntryModal({
   entry,
   initialEntries,
   categories,
+  foodEntries = [],
   onSave,
   onSaveGroups,
   onBulkSave,
@@ -273,6 +275,16 @@ export default function AddEditEntryModal({
 }) {
   const isEdit = !!entry;
   const isBulkEdit = !!onBulkSave;
+
+  const restaurantSuggestions = useMemo(() =>
+    [...new Set(foodEntries.map((e) => e.restaurantName).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [foodEntries]);
+  const foodNameSuggestions = useMemo(() =>
+    [...new Set(foodEntries.map((e) => e.specifier).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [foodEntries]);
+  const locationSuggestions = useMemo(() =>
+    [...new Set(foodEntries.map((e) => e.location).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [foodEntries]);
 
   const [form, setForm] = useState(entryToForm(null));
   const [showAdvanced, setShowAdvanced] = useState(showAdvancedByDefault);
@@ -524,15 +536,26 @@ export default function AddEditEntryModal({
     return (
       <>
         <Grid item xs={12} sm={6}>
-          <TextField label={LABEL_RESTAURANT} value={values.restaurantName}
-            onChange={(e) => onChange('restaurantName', e.target.value)}
-            fullWidth size="small" />
+          <Autocomplete
+            freeSolo
+            options={restaurantSuggestions}
+            inputValue={values.restaurantName}
+            onInputChange={(_, v) => onChange('restaurantName', v)}
+            renderInput={(params) => (
+              <TextField {...params} label={LABEL_RESTAURANT} size="small" fullWidth />
+            )}
+          />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField label={LABEL_FOOD_NAME} placeholder="e.g. Chocolate"
-            value={values.specifier}
-            onChange={(e) => onChange('specifier', e.target.value)}
-            fullWidth size="small" />
+          <Autocomplete
+            freeSolo
+            options={foodNameSuggestions}
+            inputValue={values.specifier}
+            onInputChange={(_, v) => onChange('specifier', v)}
+            renderInput={(params) => (
+              <TextField {...params} label={LABEL_FOOD_NAME} placeholder="e.g. Chocolate" size="small" fullWidth />
+            )}
+          />
         </Grid>
       </>
     );
@@ -542,10 +565,15 @@ export default function AddEditEntryModal({
     return (
       <>
         <Grid item xs={12} sm={8}>
-          <TextField label={LABEL_LOCATION} placeholder="e.g. Denver"
-            value={values.location}
-            onChange={(e) => onChange('location', e.target.value)}
-            fullWidth size="small" />
+          <Autocomplete
+            freeSolo
+            options={locationSuggestions}
+            inputValue={values.location}
+            onInputChange={(_, v) => onChange('location', v)}
+            renderInput={(params) => (
+              <TextField {...params} label={LABEL_LOCATION} placeholder="e.g. Denver" size="small" fullWidth />
+            )}
+          />
         </Grid>
         <Grid item xs={12} sm={4}>
           <TextField label={LABEL_DATE} type="date"

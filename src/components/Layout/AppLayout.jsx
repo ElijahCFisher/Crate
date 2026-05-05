@@ -279,6 +279,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         entry={editingEntry}
         initialEntries={bulkAddEntries}
         categories={categories}
+        foodEntries={foodEntries}
         onSave={handleSave}
         onSaveGroups={!editingEntry && !bulkAddEntries ? handleSaveGroups : undefined}
         onBulkSave={bulkAddEntries ? handleBulkSave : undefined}
