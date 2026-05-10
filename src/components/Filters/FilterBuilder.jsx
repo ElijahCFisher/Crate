@@ -47,21 +47,52 @@ export function makeDefaultFilter() {
   return { id: Date.now() + Math.random(), field: 'any', op: 'contains', value: '', caseSensitive: false, useRegex: false, connector: 'AND' };
 }
 
+export function getActiveFilters(filters) {
+  return filters.filter((f) => !needsValue(f) || f.value.trim());
+}
+
+export function splitFiltersIntoOrGroups(filters) {
+  const active = getActiveFilters(filters);
+  const groups = [];
+  let current = [];
+
+  for (let i = 0; i < active.length; i++) {
+    if (i > 0 && active[i].connector === 'OR' && current.length) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(active[i]);
+  }
+
+  if (current.length) groups.push(current);
+  return groups;
+}
+
+export function applyFilterGroup(entries, group, categories) {
+  if (!group.length) return entries;
+  return entries.filter((entry) => group.every((filter) => matchFilter(entry, filter, categories)));
+}
+
+export function describeFilterGroup(group) {
+  return group.map((filter, idx) => {
+    const fieldLabel = FIELDS.find((field) => field.value === filter.field)?.label || filter.field;
+    const opLabel = TEXT_OPS.find((op) => op.value === filter.op)?.label || filter.op;
+    const value = needsValue(filter) ? ` "${filter.value}"` : '';
+    const prefix = idx > 0 ? ' AND ' : '';
+    return `${prefix}${fieldLabel} ${opLabel}${value}`;
+  }).join('');
+}
+
 // ── Filter matching ───────────────────────────────────────────────────────────
 
 export function applyFilters(entries, filters, categories) {
   // Ignore filters whose value is empty and the op needs one
-  const active = filters.filter((f) => !needsValue(f) || f.value.trim());
-  if (active.length === 0) return entries;
+  const groups = splitFiltersIntoOrGroups(filters);
+  if (groups.length === 0) return entries;
 
-  return entries.filter((entry) => {
-    let result = true;
-    for (let i = 0; i < active.length; i++) {
-      const match = matchFilter(entry, active[i], categories);
-      result = i === 0 ? match : active[i].connector === 'OR' ? result || match : result && match;
-    }
-    return result;
-  });
+  return entries.filter((entry) =>
+    groups.some((group) => group.every((filter) => matchFilter(entry, filter, categories)))
+  );
 }
 
 /**
@@ -143,7 +174,7 @@ function testString(haystack, op, needle, caseSensitive, useRegex) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function FilterBuilder({ filters, onChange }) {
+export default function FilterBuilder({ filters, onChange, groupStatsByFilterId }) {
   function addFilter() {
     onChange([...filters, makeDefaultFilter()]);
   }
@@ -242,6 +273,16 @@ export default function FilterBuilder({ filters, onChange }) {
                 .*
               </ToggleButton>
             </Tooltip>
+          )}
+
+          {groupStatsByFilterId?.get(f.id) && (
+            <Chip
+              label={groupStatsByFilterId.get(f.id)}
+              size="small"
+              color="primary"
+              variant="outlined"
+              sx={{ fontWeight: 700 }}
+            />
           )}
 
           {/* Remove row */}

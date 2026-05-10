@@ -4,7 +4,7 @@ import Button from '@mui/material/Button';
 import ClearIcon from '@mui/icons-material/Clear';
 import FilterBuilder, { makeDefaultFilter } from './FilterBuilder';
 
-export default function FilterBar({ filters, onFiltersChange }) {
+export default function FilterBar({ filters, onFiltersChange, groupStatsByFilterId }) {
   const hasActiveFilter = filters.some((f) => f.value.trim() || ['isEmpty', 'isNotEmpty'].includes(f.op));
 
   function clearAll() {
@@ -13,7 +13,7 @@ export default function FilterBar({ filters, onFiltersChange }) {
 
   return (
     <Box sx={{ mb: 2 }}>
-      <FilterBuilder filters={filters} onChange={onFiltersChange} />
+      <FilterBuilder filters={filters} onChange={onFiltersChange} groupStatsByFilterId={groupStatsByFilterId} />
       {hasActiveFilter && (
         <Box sx={{ mt: 0.75 }}>
           <Button size="small" startIcon={<ClearIcon />} onClick={clearAll} color="inherit">

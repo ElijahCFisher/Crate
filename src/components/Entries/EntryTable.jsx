@@ -22,7 +22,14 @@ import AddIcon from '@mui/icons-material/Add';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import FilterBar from '../Filters/FilterBar';
-import { applyFilters, makeDefaultFilter } from '../Filters/FilterBuilder';
+import {
+  applyFilterGroup,
+  applyFilters,
+  describeFilterGroup,
+  getActiveFilters,
+  makeDefaultFilter,
+  splitFiltersIntoOrGroups,
+} from '../Filters/FilterBuilder';
 import { formatDate } from '../../utils/dateUtils';
 import { evalAdditionalInfo } from '../../utils/mathUtils';
 import {
@@ -80,6 +87,44 @@ function NotesCell({ text }) {
   );
 }
 
+function getScoreStats(entries) {
+  const scores = entries
+    .map((entry) => parseFloat(entry.score))
+    .filter((score) => Number.isFinite(score));
+
+  if (!scores.length) return { average: null, count: 0 };
+
+  const total = scores.reduce((sum, score) => sum + score, 0);
+  return { average: total / scores.length, count: scores.length };
+}
+
+function formatAverage(value) {
+  if (value == null) return 'N/A';
+  return value.toFixed(2).replace(/\.?0+$/, '');
+}
+
+function ScoreSummary({ summary }) {
+  if (!summary?.hasActiveFilter) return null;
+
+  return (
+    <Box sx={{ mt: 1, mb: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+        <Typography variant="body2" color="text.secondary">
+          Filtered average
+        </Typography>
+        <Chip
+          label={`${formatAverage(summary.overall.average)} (${summary.overall.count} rating${summary.overall.count === 1 ? '' : 's'})`}
+          size="small"
+          color={summary.overall.average == null ? 'default' : 'primary'}
+          variant="outlined"
+          sx={{ fontWeight: 700 }}
+        />
+      </Box>
+
+    </Box>
+  );
+}
+
 export default function EntryTable({
   foodEntries,
   categories,
@@ -117,6 +162,41 @@ export default function EntryTable({
     () => applyFilters(foodEntries, filters, categories),
     [foodEntries, filters, categories]
   );
+
+  const scoreSummary = useMemo(() => {
+    const hasActiveFilter = getActiveFilters(filters).length > 0;
+    if (!hasActiveFilter) return { hasActiveFilter: false };
+
+    const groups = splitFiltersIntoOrGroups(filters).map((group) => {
+      const entries = applyFilterGroup(foodEntries, group, categories);
+      return {
+        label: describeFilterGroup(group),
+        lastFilterId: group[group.length - 1]?.id,
+        stats: getScoreStats(entries),
+      };
+    });
+
+    return {
+      hasActiveFilter,
+      overall: getScoreStats(searchedEntries),
+      groups,
+    };
+  }, [filters, foodEntries, categories, searchedEntries]);
+
+  const groupStatsByFilterId = useMemo(() => {
+    const map = new Map();
+    if (!scoreSummary?.hasActiveFilter || scoreSummary.groups.length <= 1) return map;
+
+    for (const group of scoreSummary.groups) {
+      if (!group.lastFilterId) continue;
+      map.set(
+        group.lastFilterId,
+        `Avg ${formatAverage(group.stats.average)} (${group.stats.count})`
+      );
+    }
+
+    return map;
+  }, [scoreSummary]);
 
   const sortedEntries = useMemo(() => {
     return [...searchedEntries].sort((a, b) => {
@@ -323,7 +403,12 @@ export default function EntryTable({
         )}
       </Box>
 
-      <FilterBar filters={filters} onFiltersChange={setFilters} />
+      <FilterBar
+        filters={filters}
+        onFiltersChange={setFilters}
+        groupStatsByFilterId={groupStatsByFilterId}
+      />
+      <ScoreSummary summary={scoreSummary} />
 
       {loading && <LinearProgress sx={{ mb: 1 }} />}
 
