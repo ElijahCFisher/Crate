@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
 import IconButton from '@mui/material/IconButton';
@@ -9,8 +9,11 @@ import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
 import Tooltip from '@mui/material/Tooltip';
 import ToggleButton from '@mui/material/ToggleButton';
+import Collapse from '@mui/material/Collapse';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import EditIcon from '@mui/icons-material/Edit';
 import {
   LABEL_RESTAURANT, LABEL_FOOD_NAME, LABEL_RATING,
   LABEL_CATEGORY, LABEL_LOCATION, LABEL_NOTES,
@@ -43,12 +46,26 @@ function needsValue(f) {
   return !['isEmpty', 'isNotEmpty'].includes(f.op);
 }
 
+function isActiveFilter(f) {
+  return !needsValue(f) || f.value.trim();
+}
+
 export function makeDefaultFilter() {
   return { id: Date.now() + Math.random(), field: 'any', op: 'contains', value: '', caseSensitive: false, useRegex: false, connector: 'AND' };
 }
 
 export function getActiveFilters(filters) {
-  return filters.filter((f) => !needsValue(f) || f.value.trim());
+  return filters.filter(isActiveFilter);
+}
+
+export function buildDefaultFilterLogic(filters) {
+  const parts = [];
+  filters.forEach((filter) => {
+    if (!isActiveFilter(filter)) return;
+    if (parts.length > 0) parts.push(filter.connector || 'AND');
+    parts.push(describeFilter(filter));
+  });
+  return parts.join(' ');
 }
 
 export function splitFiltersIntoOrGroups(filters) {
@@ -73,26 +90,197 @@ export function applyFilterGroup(entries, group, categories) {
   return entries.filter((entry) => group.every((filter) => matchFilter(entry, filter, categories)));
 }
 
+export function describeFilter(filter) {
+  const fieldLabel = FIELDS.find((field) => field.value === filter.field)?.label || filter.field;
+  const opLabel = TEXT_OPS.find((op) => op.value === filter.op)?.label || filter.op;
+  const value = needsValue(filter) ? ` "${filter.value}"` : '';
+  return `${fieldLabel} ${opLabel}${value}`;
+}
+
 export function describeFilterGroup(group) {
   return group.map((filter, idx) => {
-    const fieldLabel = FIELDS.find((field) => field.value === filter.field)?.label || filter.field;
-    const opLabel = TEXT_OPS.find((op) => op.value === filter.op)?.label || filter.op;
-    const value = needsValue(filter) ? ` "${filter.value}"` : '';
     const prefix = idx > 0 ? ' AND ' : '';
-    return `${prefix}${fieldLabel} ${opLabel}${value}`;
+    return `${prefix}${describeFilter(filter)}`;
   }).join('');
+}
+
+function tokenizeLogic(logic, filters) {
+  const tokens = [];
+  const operands = getActiveFilters(filters)
+    .map((filter) => ({ filter, text: describeFilter(filter) }))
+    .sort((a, b) => b.text.length - a.text.length);
+  let i = 0;
+
+  while (i < logic.length) {
+    const char = logic[i];
+    if (/\s/.test(char)) {
+      i++;
+      continue;
+    }
+    if (char === '(' || char === ')') {
+      tokens.push({ type: char, value: char });
+      i++;
+      continue;
+    }
+    const wordMatch = logic.slice(i).match(/^(AND|OR)\b/i);
+    if (wordMatch) {
+      const word = wordMatch[0].toUpperCase();
+      tokens.push({ type: word, value: word });
+      i += wordMatch[0].length;
+      continue;
+    }
+    const operand = operands.find(({ text }) => logic.startsWith(text, i));
+    if (operand) {
+      tokens.push({ type: 'FILTER', value: operand.text, filterId: operand.filter.id });
+      i += operand.text.length;
+      continue;
+    }
+    return { tokens: [], error: `Expected filter text near "${logic.slice(i, i + 30)}"` };
+  }
+
+  return { tokens, error: null };
+}
+
+function parseFilterLogic(logic, filters) {
+  const normalized = (logic || buildDefaultFilterLogic(filters)).trim();
+  if (!normalized) return { valid: true, ast: null, logic: normalized };
+
+  const { tokens, error } = tokenizeLogic(normalized, filters);
+  if (error) return { valid: false, error, ast: null, logic: normalized };
+
+  let pos = 0;
+
+  function peek() {
+    return tokens[pos];
+  }
+
+  function consume(type) {
+    if (peek()?.type !== type) return null;
+    return tokens[pos++];
+  }
+
+  function parsePrimary() {
+    const token = peek();
+    if (!token) return { error: 'Expected filter text or parentheses' };
+
+    if (consume('(')) {
+      const inner = parseOr();
+      if (inner.error) return inner;
+      if (!consume(')')) return { error: 'Missing closing parenthesis' };
+      return inner;
+    }
+
+    const filter = consume('FILTER');
+    if (!filter) return { error: 'Expected filter text' };
+    return { node: { type: 'filter', filterId: filter.filterId } };
+  }
+
+  function parseAnd() {
+    let left = parsePrimary();
+    if (left.error) return left;
+
+    while (consume('AND')) {
+      const right = parsePrimary();
+      if (right.error) return right;
+      left = { node: { type: 'AND', left: left.node, right: right.node } };
+    }
+
+    return left;
+  }
+
+  function parseOr() {
+    let left = parseAnd();
+    if (left.error) return left;
+
+    while (consume('OR')) {
+      const right = parseAnd();
+      if (right.error) return right;
+      left = { node: { type: 'OR', left: left.node, right: right.node } };
+    }
+
+    return left;
+  }
+
+  const parsed = parseOr();
+  if (parsed.error) return { valid: false, error: parsed.error, ast: null, logic: normalized };
+  if (pos < tokens.length) return { valid: false, error: `Unexpected "${tokens[pos].value}"`, ast: null, logic: normalized };
+
+  return { valid: true, ast: parsed.node, logic: normalized };
+}
+
+function evalFilterAst(ast, entry, filters, categories) {
+  if (!ast) return true;
+  if (ast.type === 'AND') return evalFilterAst(ast.left, entry, filters, categories) && evalFilterAst(ast.right, entry, filters, categories);
+  if (ast.type === 'OR') return evalFilterAst(ast.left, entry, filters, categories) || evalFilterAst(ast.right, entry, filters, categories);
+
+  const filter = filters.find((f) => f.id === ast.filterId);
+  if (!filter || !isActiveFilter(filter)) return false;
+  return matchFilter(entry, filter, categories);
+}
+
+function collectTopLevelOrGroups(ast) {
+  if (!ast) return [];
+  if (ast.type === 'OR') return [...collectTopLevelOrGroups(ast.left), ...collectTopLevelOrGroups(ast.right)];
+  return [ast];
+}
+
+function collectFilterIds(ast, ids = new Set()) {
+  if (!ast) return ids;
+  if (ast.type === 'filter') ids.add(ast.filterId);
+  else {
+    collectFilterIds(ast.left, ids);
+    collectFilterIds(ast.right, ids);
+  }
+  return ids;
+}
+
+export function getFilterLogicState(filters, logic) {
+  return parseFilterLogic(logic, filters);
+}
+
+export function applyFilterLogicGroup(entries, filters, categories, ast) {
+  return entries.filter((entry) => evalFilterAst(ast, entry, filters, categories));
+}
+
+export function getFilterLogicGroups(filters, logic) {
+  const parsed = parseFilterLogic(logic, filters);
+  if (!parsed.valid || !parsed.ast) return [];
+
+  return collectTopLevelOrGroups(parsed.ast).map((ast) => {
+    const ids = collectFilterIds(ast);
+    const groupFilters = filters.filter((filter) => ids.has(filter.id));
+    return {
+      ast,
+      filters: groupFilters,
+      lastFilterId: groupFilters[groupFilters.length - 1]?.id,
+    };
+  });
+}
+
+export function remapFilterLogic(logic, oldFilters, nextFilters) {
+  if (!logic?.trim()) return logic;
+
+  let nextLogic = logic;
+  for (const oldFilter of oldFilters) {
+    const nextFilter = nextFilters.find((filter) => filter.id === oldFilter.id);
+    if (!nextFilter) continue;
+    const oldText = describeFilter(oldFilter);
+    const nextText = describeFilter(nextFilter);
+    if (oldText === nextText) continue;
+    nextLogic = nextLogic.split(oldText).join(nextText);
+  }
+  return nextLogic;
 }
 
 // ── Filter matching ───────────────────────────────────────────────────────────
 
-export function applyFilters(entries, filters, categories) {
+export function applyFilters(entries, filters, categories, logic = '') {
   // Ignore filters whose value is empty and the op needs one
-  const groups = splitFiltersIntoOrGroups(filters);
-  if (groups.length === 0) return entries;
+  const parsed = parseFilterLogic(logic, filters);
+  if (!parsed.valid) return applyFilters(entries, filters, categories);
+  if (!parsed.ast) return entries;
 
-  return entries.filter((entry) =>
-    groups.some((group) => group.every((filter) => matchFilter(entry, filter, categories)))
-  );
+  return entries.filter((entry) => evalFilterAst(parsed.ast, entry, filters, categories));
 }
 
 /**
@@ -174,7 +362,17 @@ function testString(haystack, op, needle, caseSensitive, useRegex) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function FilterBuilder({ filters, onChange, groupStatsByFilterId }) {
+export default function FilterBuilder({
+  filters,
+  filterLogic,
+  logicState,
+  onChange,
+  onFilterLogicChange,
+  groupStatsByFilterId,
+}) {
+  const [draggingId, setDraggingId] = useState(null);
+  const [showLogic, setShowLogic] = useState(false);
+
   function addFilter() {
     onChange([...filters, makeDefaultFilter()]);
   }
@@ -186,13 +384,64 @@ export default function FilterBuilder({ filters, onChange, groupStatsByFilterId 
   }
 
   function update(id, updates) {
-    onChange(filters.map((f) => (f.id === id ? { ...f, ...updates } : f)));
+    const next = filters.map((f) => (f.id === id ? { ...f, ...updates } : f));
+    onChange(next, { previousFilters: filters, nextFilters: next });
   }
+
+  function moveFilter(sourceId, targetId) {
+    if (sourceId === targetId) return;
+    const sourceIndex = filters.findIndex((f) => f.id === sourceId);
+    const targetIndex = filters.findIndex((f) => f.id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+
+    const next = [...filters];
+    const [moved] = next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    onChange(next, { previousFilters: filters, nextFilters: next });
+  }
+
+  const visibleLogic = filterLogic || buildDefaultFilterLogic(filters);
 
   return (
     <Paper variant="outlined" sx={{ p: 1.5 }}>
       {filters.map((f, idx) => (
-        <Box key={f.id} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1, flexWrap: 'wrap' }}>
+        <Box
+          key={f.id}
+          onDragEnd={() => setDraggingId(null)}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const sourceId = Number(e.dataTransfer.getData('text/plain')) || draggingId;
+            moveFilter(sourceId, f.id);
+            setDraggingId(null);
+          }}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.75,
+            mb: 1,
+            flexWrap: 'wrap',
+            opacity: draggingId === f.id ? 0.5 : 1,
+          }}
+        >
+          <Tooltip title="Drag to reorder">
+            <IconButton
+              size="small"
+              draggable
+              onDragStart={(e) => {
+                setDraggingId(f.id);
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', String(f.id));
+              }}
+              sx={{ cursor: 'grab' }}
+            >
+              <DragIndicatorIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+
           {/* AND / OR connector */}
           {idx > 0 && (
             <Tooltip title="Toggle AND / OR">
@@ -295,6 +544,39 @@ export default function FilterBuilder({ filters, onChange, groupStatsByFilterId 
       <Button size="small" startIcon={<AddIcon />} onClick={addFilter} variant="outlined">
         Add Filter
       </Button>
+
+      <Box sx={{ mt: 1 }}>
+        <Button
+          size="small"
+          startIcon={<EditIcon />}
+          onClick={() => setShowLogic((show) => !show)}
+          color="inherit"
+        >
+          {showLogic ? 'Hide Logic' : 'Edit Logic'}
+        </Button>
+      </Box>
+
+      <Collapse in={showLogic}>
+        <Box sx={{ mt: 1, display: 'flex', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
+          <TextField
+            label="Logic"
+            value={visibleLogic}
+            onChange={(e) => onFilterLogicChange?.(e.target.value)}
+            size="small"
+            multiline
+            minRows={2}
+            placeholder='(Restaurant/Brand contains "Pizza Hut" AND Category contains "Pizza") OR Restaurant/Brand contains "Dominos"'
+            error={!!filterLogic && logicState?.valid === false}
+            helperText={filterLogic && logicState?.valid === false ? logicState.error : 'Edit the full filter text with AND, OR, and parentheses.'}
+            sx={{ minWidth: 280, flex: '1 1 520px' }}
+          />
+          {filterLogic && (
+            <Button size="small" onClick={() => onFilterLogicChange?.('')} color="inherit" sx={{ mt: 0.5 }}>
+              Reset Logic
+            </Button>
+          )}
+        </Box>
+      </Collapse>
     </Paper>
   );
 }

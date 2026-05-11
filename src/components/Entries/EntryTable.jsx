@@ -23,12 +23,13 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import FilterBar from '../Filters/FilterBar';
 import {
-  applyFilterGroup,
+  applyFilterLogicGroup,
   applyFilters,
-  describeFilterGroup,
+  getFilterLogicGroups,
+  getFilterLogicState,
   getActiveFilters,
   makeDefaultFilter,
-  splitFiltersIntoOrGroups,
+  remapFilterLogic,
 } from '../Filters/FilterBuilder';
 import { formatDate } from '../../utils/dateUtils';
 import { evalAdditionalInfo } from '../../utils/mathUtils';
@@ -135,14 +136,15 @@ export default function EntryTable({
   readOnly = false,
 }) {
   const [filters, setFilters] = useState(() => loadPrefs()?.filters || [makeDefaultFilter()]);
+  const [filterLogic, setFilterLogic] = useState(() => loadPrefs()?.filterLogic || '');
   const [order, setOrder] = useState(() => loadPrefs()?.order || 'desc');
   const [orderBy, setOrderBy] = useState(() => loadPrefs()?.orderBy || 'dateRated');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(() => loadPrefs()?.rowsPerPage || 20);
 
   useEffect(() => {
-    savePrefs({ filters, order, orderBy, rowsPerPage });
-  }, [filters, order, orderBy, rowsPerPage]);
+    savePrefs({ filters, filterLogic, order, orderBy, rowsPerPage });
+  }, [filters, filterLogic, order, orderBy, rowsPerPage]);
   const [pageInput, setPageInput] = useState('1');
   const [expandedGroups, setExpandedGroups] = useState(new Set());
 
@@ -159,19 +161,23 @@ export default function EntryTable({
   );
 
   const searchedEntries = useMemo(
-    () => applyFilters(foodEntries, filters, categories),
-    [foodEntries, filters, categories]
+    () => applyFilters(foodEntries, filters, categories, filterLogic),
+    [foodEntries, filters, categories, filterLogic]
+  );
+
+  const logicState = useMemo(
+    () => getFilterLogicState(filters, filterLogic),
+    [filters, filterLogic]
   );
 
   const scoreSummary = useMemo(() => {
     const hasActiveFilter = getActiveFilters(filters).length > 0;
     if (!hasActiveFilter) return { hasActiveFilter: false };
 
-    const groups = splitFiltersIntoOrGroups(filters).map((group) => {
-      const entries = applyFilterGroup(foodEntries, group, categories);
+    const groups = getFilterLogicGroups(filters, filterLogic).map((group) => {
+      const entries = applyFilterLogicGroup(foodEntries, filters, categories, group.ast);
       return {
-        label: describeFilterGroup(group),
-        lastFilterId: group[group.length - 1]?.id,
+        lastFilterId: group.lastFilterId,
         stats: getScoreStats(entries),
       };
     });
@@ -181,7 +187,7 @@ export default function EntryTable({
       overall: getScoreStats(searchedEntries),
       groups,
     };
-  }, [filters, foodEntries, categories, searchedEntries]);
+  }, [filters, filterLogic, foodEntries, categories, searchedEntries]);
 
   const groupStatsByFilterId = useMemo(() => {
     const map = new Map();
@@ -272,7 +278,7 @@ export default function EntryTable({
   useEffect(() => {
     setPage(0);
     setExpandedGroups(new Set());
-  }, [filters, orderBy, order]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filters, filterLogic, orderBy, order]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep pageInput in sync with page state
   useEffect(() => {
@@ -290,6 +296,15 @@ export default function EntryTable({
     } else {
       setOrderBy(col);
       setOrder('asc');
+    }
+  }
+
+  function handleFiltersChange(nextFilters, meta) {
+    setFilters(nextFilters);
+    if (meta?.previousFilters && meta?.nextFilters) {
+      setFilterLogic((logic) => remapFilterLogic(logic, meta.previousFilters, meta.nextFilters));
+    } else if (getActiveFilters(nextFilters).length === 0) {
+      setFilterLogic('');
     }
   }
 
@@ -405,7 +420,10 @@ export default function EntryTable({
 
       <FilterBar
         filters={filters}
-        onFiltersChange={setFilters}
+        filterLogic={filterLogic}
+        logicState={logicState}
+        onFiltersChange={handleFiltersChange}
+        onFilterLogicChange={setFilterLogic}
         groupStatsByFilterId={groupStatsByFilterId}
       />
       <ScoreSummary summary={scoreSummary} />

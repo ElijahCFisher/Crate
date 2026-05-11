@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   applyFilterGroup,
   applyFilters,
+  buildDefaultFilterLogic,
   describeFilterGroup,
+  getFilterLogicState,
+  remapFilterLogic,
   splitFiltersIntoOrGroups,
 } from './FilterBuilder';
 
@@ -42,5 +45,28 @@ describe('filter OR groups', () => {
 
     expect(describeFilterGroup(groups[0])).toBe('Restaurant/Brand contains "Pizza Hut" AND Category contains "Pizza"');
     expect(describeFilterGroup(groups[1])).toBe('Restaurant/Brand contains "Dominos" AND Category contains "Pizza"');
+  });
+
+  it('supports parenthesized manual logic', () => {
+    const logic = '(Restaurant/Brand contains "Pizza Hut" OR Restaurant/Brand contains "Dominos") AND Category contains "Pizza"';
+
+    expect(getFilterLogicState(filters, logic).valid).toBe(true);
+    expect(applyFilters(entries, filters, categories, logic).map((entry) => entry.uuid)).toEqual(['1', '2']);
+  });
+
+  it('builds default logic from full filter text', () => {
+    expect(buildDefaultFilterLogic(filters)).toBe(
+      'Restaurant/Brand contains "Pizza Hut" AND Category contains "Pizza" OR Restaurant/Brand contains "Dominos" AND Category contains "Pizza"'
+    );
+  });
+
+  it('remaps manual logic when a filter changes', () => {
+    const nextFilters = filters.map((filter) =>
+      filter.id === 3 ? { ...filter, value: 'Dominoes' } : filter
+    );
+
+    expect(
+      remapFilterLogic('Restaurant/Brand contains "Pizza Hut" OR Restaurant/Brand contains "Dominos"', filters, nextFilters)
+    ).toBe('Restaurant/Brand contains "Pizza Hut" OR Restaurant/Brand contains "Dominoes"');
   });
 });
