@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -289,6 +289,7 @@ export default function AddEditEntryModal({
   const [form, setForm] = useState(entryToForm(null));
   const [showAdvanced, setShowAdvanced] = useState(showAdvancedByDefault);
   const [formKey, setFormKey] = useState(0);
+  const highlightedSuggestionsRef = useRef({});
 
   useEffect(() => {
     if (open) {
@@ -316,6 +317,19 @@ export default function AddEditEntryModal({
       next[idx] = { ...next[idx], [field]: value };
       return { ...f, additionalRatings: next };
     });
+  }
+
+  function suggestionCommitProps(field, onChange) {
+    return {
+      onHighlightChange: (_, option) => {
+        highlightedSuggestionsRef.current[field] = option || '';
+      },
+      onKeyDown: (event) => {
+        if (event.key !== 'Tab') return;
+        const option = highlightedSuggestionsRef.current[field];
+        if (option) onChange(field, option);
+      },
+    };
   }
 
   function addAdditionalRating() {
@@ -540,7 +554,11 @@ export default function AddEditEntryModal({
             freeSolo
             options={restaurantSuggestions}
             inputValue={values.restaurantName}
-            onInputChange={(_, v) => onChange('restaurantName', v)}
+            onInputChange={(_, v) => {
+              highlightedSuggestionsRef.current.restaurantName = '';
+              onChange('restaurantName', v);
+            }}
+            {...suggestionCommitProps('restaurantName', onChange)}
             renderInput={(params) => (
               <TextField {...params} label={LABEL_RESTAURANT} size="small" fullWidth />
             )}
@@ -551,7 +569,11 @@ export default function AddEditEntryModal({
             freeSolo
             options={foodNameSuggestions}
             inputValue={values.specifier}
-            onInputChange={(_, v) => onChange('specifier', v)}
+            onInputChange={(_, v) => {
+              highlightedSuggestionsRef.current.specifier = '';
+              onChange('specifier', v);
+            }}
+            {...suggestionCommitProps('specifier', onChange)}
             renderInput={(params) => (
               <TextField {...params} label={LABEL_FOOD_NAME} placeholder="e.g. Chocolate" size="small" fullWidth />
             )}
@@ -569,7 +591,11 @@ export default function AddEditEntryModal({
             freeSolo
             options={locationSuggestions}
             inputValue={values.location}
-            onInputChange={(_, v) => onChange('location', v)}
+            onInputChange={(_, v) => {
+              highlightedSuggestionsRef.current.location = '';
+              onChange('location', v);
+            }}
+            {...suggestionCommitProps('location', onChange)}
             renderInput={(params) => (
               <TextField {...params} label={LABEL_LOCATION} placeholder="e.g. Denver" size="small" fullWidth />
             )}
