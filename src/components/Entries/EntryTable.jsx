@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useDeferredValue } from 'react';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
@@ -147,6 +147,8 @@ export default function EntryTable({
   }, [filters, filterLogic, order, orderBy, rowsPerPage]);
   const [pageInput, setPageInput] = useState('1');
   const [expandedGroups, setExpandedGroups] = useState(new Set());
+  const deferredFilters = useDeferredValue(filters);
+  const deferredFilterLogic = useDeferredValue(filterLogic);
 
   const categoryMap = useMemo(() => {
     const m = new Map();
@@ -161,8 +163,8 @@ export default function EntryTable({
   );
 
   const searchedEntries = useMemo(
-    () => applyFilters(foodEntries, filters, categories, filterLogic),
-    [foodEntries, filters, categories, filterLogic]
+    () => applyFilters(foodEntries, deferredFilters, categories, deferredFilterLogic),
+    [foodEntries, deferredFilters, categories, deferredFilterLogic]
   );
 
   const logicState = useMemo(
@@ -171,11 +173,11 @@ export default function EntryTable({
   );
 
   const scoreSummary = useMemo(() => {
-    const hasActiveFilter = getActiveFilters(filters).length > 0;
+    const hasActiveFilter = getActiveFilters(deferredFilters).length > 0;
     if (!hasActiveFilter) return { hasActiveFilter: false };
 
-    const groups = getFilterLogicGroups(filters, filterLogic).map((group) => {
-      const entries = applyFilterLogicGroup(foodEntries, filters, categories, group.ast);
+    const groups = getFilterLogicGroups(deferredFilters, deferredFilterLogic).map((group) => {
+      const entries = applyFilterLogicGroup(foodEntries, deferredFilters, categories, group.ast);
       return {
         lastFilterId: group.lastFilterId,
         stats: getScoreStats(entries),
@@ -187,7 +189,7 @@ export default function EntryTable({
       overall: getScoreStats(searchedEntries),
       groups,
     };
-  }, [filters, filterLogic, foodEntries, categories, searchedEntries]);
+  }, [deferredFilters, deferredFilterLogic, foodEntries, categories, searchedEntries]);
 
   const groupStatsByFilterId = useMemo(() => {
     const map = new Map();
@@ -248,7 +250,7 @@ export default function EntryTable({
     // UUID-field search priority: if the active filter is a UUID-field filter
     // and an "other" has a better UUID match than the primary, promote it.
     let uuidFilterValue = null;
-    for (const f of filters) {
+    for (const f of deferredFilters) {
       if (f.field === 'uuid' && f.value?.trim()) {
         uuidFilterValue = f.value.trim().toLowerCase();
         break;
@@ -270,7 +272,7 @@ export default function EntryTable({
     }
 
     return result;
-  }, [sortedEntries, allEntriesMap, filters]);
+  }, [sortedEntries, allEntriesMap, deferredFilters]);
 
   const totalPages = Math.max(1, Math.ceil(groups.length / rowsPerPage));
 
@@ -278,7 +280,7 @@ export default function EntryTable({
   useEffect(() => {
     setPage(0);
     setExpandedGroups(new Set());
-  }, [filters, filterLogic, orderBy, order]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [deferredFilters, deferredFilterLogic, orderBy, order]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep pageInput in sync with page state
   useEffect(() => {

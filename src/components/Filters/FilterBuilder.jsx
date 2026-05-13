@@ -87,7 +87,8 @@ export function splitFiltersIntoOrGroups(filters) {
 
 export function applyFilterGroup(entries, group, categories) {
   if (!group.length) return entries;
-  return entries.filter((entry) => group.every((filter) => matchFilter(entry, filter, categories)));
+  const catMap = makeCategoryMap(categories);
+  return entries.filter((entry) => group.every((filter) => matchFilter(entry, filter, catMap)));
 }
 
 export function describeFilter(filter) {
@@ -208,14 +209,14 @@ function parseFilterLogic(logic, filters) {
   return { valid: true, ast: parsed.node, logic: normalized };
 }
 
-function evalFilterAst(ast, entry, filters, categories) {
+function evalFilterAstWithCatMap(ast, entry, filters, catMap) {
   if (!ast) return true;
-  if (ast.type === 'AND') return evalFilterAst(ast.left, entry, filters, categories) && evalFilterAst(ast.right, entry, filters, categories);
-  if (ast.type === 'OR') return evalFilterAst(ast.left, entry, filters, categories) || evalFilterAst(ast.right, entry, filters, categories);
+  if (ast.type === 'AND') return evalFilterAstWithCatMap(ast.left, entry, filters, catMap) && evalFilterAstWithCatMap(ast.right, entry, filters, catMap);
+  if (ast.type === 'OR') return evalFilterAstWithCatMap(ast.left, entry, filters, catMap) || evalFilterAstWithCatMap(ast.right, entry, filters, catMap);
 
   const filter = filters.find((f) => f.id === ast.filterId);
   if (!filter || !isActiveFilter(filter)) return false;
-  return matchFilter(entry, filter, categories);
+  return matchFilter(entry, filter, catMap);
 }
 
 function collectTopLevelOrGroups(ast) {
@@ -239,7 +240,8 @@ export function getFilterLogicState(filters, logic) {
 }
 
 export function applyFilterLogicGroup(entries, filters, categories, ast) {
-  return entries.filter((entry) => evalFilterAst(ast, entry, filters, categories));
+  const catMap = makeCategoryMap(categories);
+  return entries.filter((entry) => evalFilterAstWithCatMap(ast, entry, filters, catMap));
 }
 
 export function getFilterLogicGroups(filters, logic) {
@@ -280,7 +282,8 @@ export function applyFilters(entries, filters, categories, logic = '') {
   if (!parsed.valid) return applyFilters(entries, filters, categories);
   if (!parsed.ast) return entries;
 
-  return entries.filter((entry) => evalFilterAst(parsed.ast, entry, filters, categories));
+  const catMap = makeCategoryMap(categories);
+  return entries.filter((entry) => evalFilterAstWithCatMap(parsed.ast, entry, filters, catMap));
 }
 
 /**
@@ -293,11 +296,14 @@ function allCatNamesStr(entry, catMap) {
   return Array.from(uuids).map((uuid) => catMap.get(uuid) || '').filter(Boolean).join(' ');
 }
 
-function matchFilter(entry, filter, categories) {
-  const { field, op, value, caseSensitive, useRegex } = filter;
+function makeCategoryMap(categories) {
+  return categories instanceof Map
+    ? categories
+    : new Map(categories.map((c) => [c.uuid, c.restaurantName]));
+}
 
-  // Build catMap once per filter call for fast UUID → name lookup
-  const catMap = new Map(categories.map((c) => [c.uuid, c.restaurantName]));
+function matchFilter(entry, filter, catMap) {
+  const { field, op, value, caseSensitive, useRegex } = filter;
 
   // UUID field: exact match only (no partial substring matching)
   if (field === 'uuid') {
