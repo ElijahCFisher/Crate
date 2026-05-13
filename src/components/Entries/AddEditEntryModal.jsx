@@ -18,6 +18,7 @@ import Box from '@mui/material/Box';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import EditIcon from '@mui/icons-material/Edit';
 import ReplayIcon from '@mui/icons-material/Replay';
 import { CategorySelect } from '../Categories/CategorySelector';
 import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
@@ -67,6 +68,7 @@ const SHARED_DEFAULTS = {
   dateRated: '',
   additionalInfo: '',
   picture: '',
+  identicalsText: '',
 };
 
 function entryToForm(entry) {
@@ -84,6 +86,7 @@ function entryToForm(entry) {
     dateRated: msToDateInput(entry.dateRated),
     additionalInfo: entry.additionalInfo || '',
     picture: entry.picture || '',
+    identicalsText: formatIdenticalsForInput(entry.identicals),
     primaryRating: {
       ratingCategory: entry.ratingCategory || '',
       newCategoryName: null,
@@ -91,6 +94,28 @@ function entryToForm(entry) {
     },
     additionalRatings: [],
   };
+}
+
+function formatIdenticalsForInput(identicals) {
+  return (identicals || []).filter(Boolean).join('\n');
+}
+
+function parseIdenticalsInput(value, ownUuid) {
+  const seen = new Set();
+  return String(value || '')
+    .split(/[\s,|]+/)
+    .map((uuid) => uuid.trim())
+    .filter((uuid) => uuid && uuid !== ownUuid)
+    .filter((uuid) => {
+      if (seen.has(uuid)) return false;
+      seen.add(uuid);
+      return true;
+    });
+}
+
+function sameStringArray(a, b) {
+  if (a.length !== b.length) return false;
+  return a.every((value, i) => value === b[i]);
 }
 
 /**
@@ -117,6 +142,12 @@ function computeDiff(original, formShared, primaryRating) {
   const fDateStr = formShared.dateRated;
   const oDateStr = msToDateInput(original.dateRated);
   if (fDateStr !== oDateStr) updates.dateRated = dateInputToMs(fDateStr);
+
+  if ('identicalsText' in formShared) {
+    const nextIdenticals = parseIdenticalsInput(formShared.identicalsText, original.uuid);
+    const currentIdenticals = parseIdenticalsInput(formatIdenticalsForInput(original.identicals), original.uuid);
+    if (!sameStringArray(nextIdenticals, currentIdenticals)) updates.identicals = nextIdenticals;
+  }
 
   return updates;
 }
@@ -288,12 +319,14 @@ export default function AddEditEntryModal({
 
   const [form, setForm] = useState(entryToForm(null));
   const [showAdvanced, setShowAdvanced] = useState(showAdvancedByDefault);
+  const [showIdenticalsEditor, setShowIdenticalsEditor] = useState(false);
   const [formKey, setFormKey] = useState(0);
   const highlightedSuggestionsRef = useRef({});
 
   useEffect(() => {
     if (open) {
       setShowAdvanced(showAdvancedByDefault);
+      setShowIdenticalsEditor(false);
       setFormKey((k) => k + 1);
       if (!entry && initialEntries && initialEntries.length > 0) {
         setForm(entriesToForm(initialEntries));
@@ -628,6 +661,39 @@ export default function AddEditEntryModal({
     );
   }
 
+  function renderIdenticalsEditor() {
+    const identicals = parseIdenticalsInput(form.identicalsText, entry?.uuid);
+    return (
+      <Grid item xs={12}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: showIdenticalsEditor ? 1 : 0 }}>
+          <Typography variant="body2" color="text.secondary">
+            Identicals: {identicals.length}
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<EditIcon fontSize="small" />}
+            onClick={() => setShowIdenticalsEditor((v) => !v)}
+          >
+            {showIdenticalsEditor ? 'Hide' : 'Edit'}
+          </Button>
+        </Box>
+        {showIdenticalsEditor && (
+          <TextField
+            label="Identicals"
+            value={form.identicalsText}
+            onChange={(e) => setShared('identicalsText', e.target.value)}
+            helperText="Enter entry UUIDs separated by spaces, commas, pipes, or new lines."
+            fullWidth
+            multiline
+            minRows={3}
+            size="small"
+          />
+        )}
+      </Grid>
+    );
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -720,6 +786,7 @@ export default function AddEditEntryModal({
                   setShared,
                   (v) => setForm((f) => ({ ...f, dateRated: v, dateRatedMs: dateInputToMs(v) }))
                 )}
+                {isEdit && renderIdenticalsEditor()}
               </>
             )}
 

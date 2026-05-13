@@ -25,6 +25,11 @@ function decodeFollowRequest(encoded) {
   }
 }
 
+function sameUuidList(a, b) {
+  if (a.length !== b.length) return false;
+  return a.every((uuid, i) => uuid === b[i]);
+}
+
 export default function AppLayout({ auth, data, onReauthenticate }) {
   const {
     combined,
@@ -112,6 +117,29 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
   function handleSave(payload) {
     if (editingEntry) {
       modifyEntry(editingEntry.uuid, payload);
+      if ('identicals' in payload) {
+        const nextIdenticals = payload.identicals || [];
+        const nextSet = new Set(nextIdenticals);
+        const previousSet = new Set(editingEntry.identicals || []);
+        const relatedUuids = new Set([...nextSet, ...previousSet]);
+        const entriesByUuid = new Map(foodEntries.map((entry) => [entry.uuid, entry]));
+
+        for (const uuid of relatedUuids) {
+          const relatedEntry = entriesByUuid.get(uuid);
+          if (!relatedEntry) continue;
+
+          const relatedIdenticals = relatedEntry.identicals || [];
+          const reconciled = nextSet.has(uuid)
+            ? relatedIdenticals.includes(editingEntry.uuid)
+              ? relatedIdenticals
+              : [...relatedIdenticals, editingEntry.uuid]
+            : relatedIdenticals.filter((id) => id !== editingEntry.uuid);
+
+          if (!sameUuidList(relatedEntry.identicals || [], reconciled)) {
+            modifyEntry(uuid, { identicals: reconciled });
+          }
+        }
+      }
     } else {
       addEntry(payload);
     }
