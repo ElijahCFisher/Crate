@@ -98,7 +98,7 @@ function getScoreStats(entries) {
   const total = scores.reduce((sum, score) => sum + score, 0);
   const average = total / scores.length;
 
-  const weightFn = (x) => 10 / (10.025 - x);
+  const weightFn = (x) => 10 / (10.5 - x);
   const totalWeight = scores.reduce((sum, score) => sum + weightFn(score), 0);
   const weightedTotal = scores.reduce((sum, score) => sum + score * weightFn(score), 0);
   const weightedAverage = weightedTotal / totalWeight;
@@ -214,6 +214,23 @@ export default function EntryTable({
   }, [scoreSummary]);
 
   const sortedEntries = useMemo(() => {
+    const parseLeadingNumber = (val) => {
+      const str = String(val);
+      const match = str.match(/^(-?\d+(\.\d+)?)(.*)/s);
+      if (!match) return { num: null, rest: str };
+      return { num: parseFloat(match[1]), rest: match[3] };
+    };
+
+    const compareValues = (aVal, bVal) => {
+      const a = parseLeadingNumber(aVal ?? '');
+      const b = parseLeadingNumber(bVal ?? '');
+      if (a.num !== null && b.num !== null) {
+        if (a.num !== b.num) return a.num - b.num;
+        return a.rest < b.rest ? -1 : a.rest > b.rest ? 1 : 0;
+      }
+      return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+    };
+
     return [...searchedEntries].sort((a, b) => {
       let aVal, bVal;
       if (orderBy === 'ratingCategory') {
@@ -223,9 +240,8 @@ export default function EntryTable({
         aVal = a[orderBy] ?? '';
         bVal = b[orderBy] ?? '';
       }
-      if (aVal < bVal) return order === 'asc' ? -1 : 1;
-      if (aVal > bVal) return order === 'asc' ? 1 : -1;
-      return 0;
+      const cmp = compareValues(aVal, bVal);
+      return order === 'asc' ? cmp : -cmp;
     });
   }, [searchedEntries, order, orderBy, categoryMap]);
 
