@@ -93,10 +93,17 @@ function getScoreStats(entries) {
     .map((entry) => parseFloat(entry.score))
     .filter((score) => Number.isFinite(score));
 
-  if (!scores.length) return { average: null, count: 0 };
+  if (!scores.length) return { average: null, weightedAverage: null, count: 0 };
 
   const total = scores.reduce((sum, score) => sum + score, 0);
-  return { average: total / scores.length, count: scores.length };
+  const average = total / scores.length;
+
+  const weightFn = (x) => 10 / (10.025 - x);
+  const totalWeight = scores.reduce((sum, score) => sum + weightFn(score), 0);
+  const weightedTotal = scores.reduce((sum, score) => sum + score * weightFn(score), 0);
+  const weightedAverage = weightedTotal / totalWeight;
+
+  return { average, weightedAverage, count: scores.length };
 }
 
 function formatAverage(value) {
@@ -114,7 +121,7 @@ function ScoreSummary({ summary }) {
           Filtered average
         </Typography>
         <Chip
-          label={`${formatAverage(summary.overall.average)} (${summary.overall.count} rating${summary.overall.count === 1 ? '' : 's'})`}
+          label={`${formatAverage(summary.overall.weightedAverage)} (${formatAverage(summary.overall.average)}) · ${summary.overall.count} rating${summary.overall.count === 1 ? '' : 's'}`}
           size="small"
           color={summary.overall.average == null ? 'default' : 'primary'}
           variant="outlined"
@@ -199,7 +206,7 @@ export default function EntryTable({
       if (!group.lastFilterId) continue;
       map.set(
         group.lastFilterId,
-        `Avg ${formatAverage(group.stats.average)} (${group.stats.count})`
+        `Avg ${formatAverage(group.stats.weightedAverage)} (${formatAverage(group.stats.average)}) · ${group.stats.count}`
       );
     }
 
