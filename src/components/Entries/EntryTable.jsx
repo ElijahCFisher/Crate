@@ -31,8 +31,11 @@ import {
   makeDefaultFilter,
   remapFilterLogic,
 } from '../Filters/FilterBuilder';
+import Switch from '@mui/material/Switch';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import { formatDate } from '../../utils/dateUtils';
 import { evalAdditionalInfo } from '../../utils/mathUtils';
+import { convertToBaseScore, getBaseCategory } from '../../utils/scaleUtils';
 import {
   LABEL_RESTAURANT, LABEL_FOOD_NAME, LABEL_RATING,
   LABEL_CATEGORY, LABEL_LOCATION, LABEL_DATE, LABEL_NOTES,
@@ -60,13 +63,15 @@ const COLUMNS = [
 const TOTAL_COLS = COLUMNS.length + 2;
 const TOTAL_COLS_READONLY = COLUMNS.length + 1;
 
-function ScoreBadge({ score }) {
+function ScoreBadge({ score, displayScore }) {
   if (score == null) return <Typography variant="body2" color="text.disabled">—</Typography>;
-  const num = parseFloat(score);
+  const shown = displayScore ?? score;
+  const num = parseFloat(shown);
   const color = !isNaN(num) ? (num >= 8 ? 'success' : num >= 5 ? 'warning' : 'error') : undefined;
+  const label = typeof shown === 'number' ? shown.toFixed(2).replace(/\.?0+$/, '') : shown;
   return (
     <Chip
-      label={score}
+      label={label}
       size="small"
       color={color}
       variant="outlined"
@@ -88,9 +93,15 @@ function NotesCell({ text }) {
   );
 }
 
-function getScoreStats(entries) {
+function getScoreStats(entries, categoryFullMap) {
   const scores = entries
-    .map((entry) => parseFloat(entry.score))
+    .map((entry) => {
+      const raw = parseFloat(entry.score);
+      if (!Number.isFinite(raw)) return NaN;
+      return categoryFullMap
+        ? convertToBaseScore(raw, entry.ratingCategory, categoryFullMap)
+        : raw;
+    })
     .filter((score) => Number.isFinite(score));
 
   if (!scores.length) return { average: null, weightedAverage: null, count: 0 };
@@ -111,14 +122,14 @@ function formatAverage(value) {
   return value.toFixed(2).replace(/\.?0+$/, '');
 }
 
-function ScoreSummary({ summary }) {
+function ScoreSummary({ summary, baseLabel }) {
   if (!summary?.hasActiveFilter) return null;
 
   return (
     <Box sx={{ mt: 1, mb: 2 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
         <Typography variant="body2" color="text.secondary">
-          Filtered average
+          Filtered average{baseLabel ? ` (${baseLabel})` : ''}
         </Typography>
         <Chip
           label={`${formatAverage(summary.overall.weightedAverage)} (${formatAverage(summary.overall.average)}) · ${summary.overall.count} rating${summary.overall.count === 1 ? '' : 's'}`}
@@ -128,7 +139,6 @@ function ScoreSummary({ summary }) {
           sx={{ fontWeight: 700 }}
         />
       </Box>
-
     </Box>
   );
 }
@@ -148,10 +158,11 @@ export default function EntryTable({
   const [orderBy, setOrderBy] = useState(() => loadPrefs()?.orderBy || 'dateRated');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(() => loadPrefs()?.rowsPerPage || 20);
+  const [showBaseScores, setShowBaseScores] = useState(() => loadPrefs()?.showBaseScores || false);
 
   useEffect(() => {
-    savePrefs({ filters, filterLogic, order, orderBy, rowsPerPage });
-  }, [filters, filterLogic, order, orderBy, rowsPerPage]);
+    savePrefs({ filters, filterLogic, order, orderBy, rowsPerPage, showBaseScores });
+  }, [filters, filterLogic, order, orderBy, rowsPerPage, showBaseScores]);
   const [pageInput, setPageInput] = useState('1');
   const [expandedGroups, setExpandedGroups] = useState(new Set());
   const deferredFilters = useDeferredValue(filters);
@@ -162,6 +173,19 @@ export default function EntryTable({
     for (const c of categories) m.set(c.uuid, c.restaurantName);
     return m;
   }, [categories]);
+
+  const categoryFullMap = useMemo(() => {
+    const m = new Map();
+    for (const c of categories) m.set(c.uuid, c);
+    return m;
+  }, [categories]);
+
+  const baseCategoryName = useMemo(() => {
+    // Find the name of the root category by sampling any category in the tree
+    if (!categories.length) return null;
+    const rootCat = getBaseCategory(categories[0].uuid, categoryFullMap);
+    return rootCat?.restaurantName || null;
+  }, [categories, categoryFullMap]);
 
   // Full map of all food entries by UUID — used to look up identical entries
   const allEntriesMap = useMemo(
@@ -187,16 +211,16 @@ export default function EntryTable({
       const entries = applyFilterLogicGroup(foodEntries, deferredFilters, categories, group.ast);
       return {
         lastFilterId: group.lastFilterId,
-        stats: getScoreStats(entries),
+        stats: getScoreStats(entries, categoryFullMap),
       };
     });
 
     return {
       hasActiveFilter,
-      overall: getScoreStats(searchedEntries),
+      overall: getScoreStats(searchedEntries, categoryFullMap),
       groups,
     };
-  }, [deferredFilters, deferredFilterLogic, foodEntries, categories, searchedEntries]);
+  }, [deferredFilters, deferredFilterLogic, foodEntries, categories, searchedEntries, categoryFullMap]);
 
   const groupStatsByFilterId = useMemo(() => {
     const map = new Map();
@@ -406,7 +430,16 @@ export default function EntryTable({
         <TableCell>{entry.restaurantName || '—'}</TableCell>
         <TableCell>{entry.specifier || '—'}</TableCell>
         <TableCell>{entry.location || '—'}</TableCell>
-        <TableCell align="center"><ScoreBadge score={entry.score} /></TableCell>
+        <TableCell align="center">
+          <ScoreBadge
+            score={entry.score}
+            displayScore={
+              showBaseScores && entry.score != null
+                ? convertToBaseScore(parseFloat(entry.score), entry.ratingCategory, categoryFullMap)
+                : undefined
+            }
+          />
+        </TableCell>
         <TableCell>{formatDate(entry.dateRated)}</TableCell>
         <TableCell><NotesCell text={entry.additionalInfo} /></TableCell>
         {!readOnly && (
@@ -436,11 +469,29 @@ export default function EntryTable({
             ({searchedEntries.length}{searchedEntries.length !== foodEntries.length ? ` / ${foodEntries.length}` : ''})
           </Typography>
         </Typography>
-        {!readOnly && (
-          <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd} size="small">
-            Add Entry
-          </Button>
-        )}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          {baseCategoryName && (
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={showBaseScores}
+                  onChange={(e) => setShowBaseScores(e.target.checked)}
+                />
+              }
+              label={
+                <Typography variant="body2" color="text.secondary">
+                  Show as {baseCategoryName}
+                </Typography>
+              }
+            />
+          )}
+          {!readOnly && (
+            <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd} size="small">
+              Add Entry
+            </Button>
+          )}
+        </Box>
       </Box>
 
       <FilterBar
@@ -451,7 +502,7 @@ export default function EntryTable({
         onFilterLogicChange={setFilterLogic}
         groupStatsByFilterId={groupStatsByFilterId}
       />
-      <ScoreSummary summary={scoreSummary} />
+      <ScoreSummary summary={scoreSummary} baseLabel={baseCategoryName} />
 
       {loading && <LinearProgress sx={{ mb: 1 }} />}
 

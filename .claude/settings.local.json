@@ -19,7 +19,10 @@
       "Bash(npm uninstall *)",
       "Bash(npx vitest *)",
       "Bash(node -e ' *)",
-      "PowerShell(Get-PSDrive C | Select-Object Used, Free, @{N='FreeGB';E={[math]::Round\\($_.Free/1GB,2\\)}}, @{N='UsedGB';E={[math]::Round\\($_.Used/1GB,2\\)}})"
+      "PowerShell(Get-PSDrive C | Select-Object Used, Free, @{N='FreeGB';E={[math]::Round\\($_.Free/1GB,2\\)}}, @{N='UsedGB';E={[math]::Round\\($_.Used/1GB,2\\)}})",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Elij\\\\Documents\\\\Programming\\\\Crate\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)"
     ]
   }
 }
