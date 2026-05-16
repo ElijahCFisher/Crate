@@ -38,6 +38,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     categories,
     fileId: dataFileId,
     folderId,
+    picturesFolderId,
     loading,
     syncing,
     syncError,
@@ -300,6 +301,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
             sharedWith={sharedWith}
             userProfile={auth.userProfile}
             dataFileId={dataFileId}
+            picturesFolderId={picturesFolderId}
             onAddToFollowing={addToFollowing}
             onRemoveFromFollowing={removeFromFollowing}
             onRemoveFromRequestedToFollow={removeFromRequestedToFollow}
@@ -323,6 +325,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         onAddCategory={handleAddCategory}
         onClose={closeAddEdit}
         showAdvancedByDefault={showAdvancedByDefault}
+        picturesFolderId={picturesFolderId}
       />
 
       {/* Delete confirm */}
@@ -348,6 +351,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         open={!!followRequester}
         requester={followRequester}
         dataFileId={dataFileId}
+        picturesFolderId={picturesFolderId}
         onAccept={handleFollowAccept}
         onDecline={() => setFollowRequester(null)}
       />

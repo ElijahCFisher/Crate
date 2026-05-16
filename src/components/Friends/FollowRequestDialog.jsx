@@ -15,6 +15,7 @@ export default function FollowRequestDialog({
   open,
   requester,   // { email, displayName }
   dataFileId,
+  picturesFolderId,
   onAccept,    // (requester) => void — called after share succeeds
   onDecline,
 }) {
@@ -27,6 +28,7 @@ export default function FollowRequestDialog({
     setError(null);
     try {
       await shareFile(dataFileId, requester.email);
+      if (picturesFolderId) await shareFile(picturesFolderId, requester.email);
       onAccept(requester);
     } catch (err) {
       setError(err.message || 'Failed to share. Try again.');
@@ -51,7 +53,7 @@ export default function FollowRequestDialog({
           wants to follow your food ratings.
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Accepting will share your ratings file with them (read-only).
+          Accepting will share your ratings and photos with them (read-only).
         </Typography>
         {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
       </DialogContent>

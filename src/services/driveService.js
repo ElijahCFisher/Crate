@@ -154,6 +154,62 @@ export async function findOrCreateJsonFile(folderId, fileName, defaultContent = 
   return file.id;
 }
 
+export async function findOrCreateSubfolder(parentFolderId, name) {
+  const query = `name='${name}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const res = await driveRequest(
+    `${DRIVE_API}/files?q=${encodeURIComponent(query)}&fields=files(id,name)&spaces=drive`
+  );
+  const data = await res.json();
+  if (data.files?.length > 0) return data.files[0].id;
+
+  const createRes = await driveRequest(`${DRIVE_API}/files`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] }),
+  });
+  const folder = await createRes.json();
+  return folder.id;
+}
+
+export async function uploadPhoto(folderId, uuid, file) {
+  const mimeType = file.type || 'image/jpeg';
+  const ext = mimeType.split('/')[1]?.split('+')[0] || 'jpg';
+  const fileName = `${uuid}.${ext}`;
+  const metadata = { name: fileName, parents: [folderId], mimeType };
+  const boundary = 'photo_upload_boundary';
+
+  const arrayBuffer = await file.arrayBuffer();
+  const imageBytes = new Uint8Array(arrayBuffer);
+  const enc = new TextEncoder();
+  const pre = enc.encode(
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+    JSON.stringify(metadata) +
+    `\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`
+  );
+  const post = enc.encode(`\r\n--${boundary}--`);
+  const body = new Uint8Array(pre.length + imageBytes.length + post.length);
+  body.set(pre, 0);
+  body.set(imageBytes, pre.length);
+  body.set(post, pre.length + imageBytes.length);
+
+  const res = await driveRequest(
+    `${UPLOAD_API}/files?uploadType=multipart&fields=id`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body,
+    }
+  );
+  const data = await res.json();
+  return data.id;
+}
+
+export async function fetchPhotoBlob(fileId) {
+  const res = await driveFetch(`${DRIVE_API}/files/${fileId}?alt=media`);
+  if (!res.ok) throw new Error(`Photo fetch failed: ${res.status}`);
+  return res.blob();
+}
+
 export async function getUserProfile() {
   const res = await driveFetch('https://www.googleapis.com/oauth2/v3/userinfo');
   if (!res.ok) throw new Error('Failed to fetch user profile');

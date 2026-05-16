@@ -20,7 +20,10 @@ import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import EditIcon from '@mui/icons-material/Edit';
 import ReplayIcon from '@mui/icons-material/Replay';
+import CameraAltIcon from '@mui/icons-material/CameraAlt';
+import ClearIcon from '@mui/icons-material/Clear';
 import { CategorySelect } from '../Categories/CategorySelector';
+import { uploadPhoto, fetchPhotoBlob } from '../../services/driveService';
 import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
 import { evalAdditionalInfo, hasExpressions } from '../../utils/mathUtils';
 import {
@@ -289,6 +292,27 @@ function entriesToForm(entries) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+function DriveImage({ fileId }) {
+  const [src, setSrc] = useState(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!fileId) return;
+    let objectUrl;
+    fetchPhotoBlob(fileId)
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      })
+      .catch(() => setError(true));
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [fileId]);
+
+  if (error) return <Typography variant="caption" color="error">Failed to load photo</Typography>;
+  if (!src) return <CircularProgress size={20} />;
+  return <img src={src} alt="Rating photo" style={{ maxHeight: 160, maxWidth: '100%', borderRadius: 4, display: 'block' }} />;
+}
+
 export default function AddEditEntryModal({
   open,
   entry,
@@ -303,6 +327,7 @@ export default function AddEditEntryModal({
   loading,
   saveError,
   showAdvancedByDefault = false,
+  picturesFolderId,
 }) {
   const isEdit = !!entry;
   const isBulkEdit = !!onBulkSave;
@@ -321,6 +346,8 @@ export default function AddEditEntryModal({
   const [showAdvanced, setShowAdvanced] = useState(showAdvancedByDefault);
   const [showIdenticalsEditor, setShowIdenticalsEditor] = useState(false);
   const [formKey, setFormKey] = useState(0);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const photoInputRef = useRef(null);
   const highlightedSuggestionsRef = useRef({});
 
   useEffect(() => {
@@ -363,6 +390,20 @@ export default function AddEditEntryModal({
         if (option) onChange(field, option);
       },
     };
+  }
+
+  async function handlePhotoSelect(file, onChange) {
+    if (!file || !picturesFolderId) return;
+    setPhotoUploading(true);
+    try {
+      const fileId = await uploadPhoto(picturesFolderId, crypto.randomUUID(), file);
+      onChange('picture', fileId);
+    } catch (err) {
+      console.error('Photo upload failed:', err);
+    } finally {
+      setPhotoUploading(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
   }
 
   function addAdditionalRating() {
@@ -652,10 +693,45 @@ export default function AddEditEntryModal({
           )}
         </Grid>
         <Grid item xs={12}>
-          <TextField label={LABEL_PICTURE}
-            value={values.picture}
-            onChange={(e) => onChange('picture', e.target.value)}
-            fullWidth size="small" />
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{ display: 'none' }}
+            onChange={(e) => handlePhotoSelect(e.target.files?.[0], onChange)}
+          />
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+                {LABEL_PICTURE}
+              </Typography>
+              {photoUploading ? (
+                <CircularProgress size={20} />
+              ) : (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<CameraAltIcon fontSize="small" />}
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={!picturesFolderId}
+                >
+                  {values.picture ? 'Replace' : 'Add Photo'}
+                </Button>
+              )}
+              {values.picture && !photoUploading && (
+                <IconButton size="small" onClick={() => onChange('picture', '')}>
+                  <ClearIcon fontSize="small" />
+                </IconButton>
+              )}
+            </Box>
+            {values.picture && !values.picture.startsWith('http') && (
+              <DriveImage fileId={values.picture} />
+            )}
+            {values.picture && values.picture.startsWith('http') && (
+              <img src={values.picture} alt="Rating photo" style={{ maxHeight: 160, maxWidth: '100%', borderRadius: 4, display: 'block' }} />
+            )}
+          </Box>
         </Grid>
       </>
     );

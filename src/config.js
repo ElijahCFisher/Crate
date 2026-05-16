@@ -5,6 +5,7 @@ export const DRIVE_FOLDER_NAME = 'Food Ratings';
 export const DRIVE_FILE_NAME = 'food-ratings-data.csv';
 export const DRIVE_CHANGELOG_FILE_NAME = 'food-ratings-changelog.csv';
 export const SETTINGS_FILE_NAME = 'SettingsEtc.json';
+export const DRIVE_PICTURES_FOLDER_NAME = 'Pictures';
 
 // Full scope string used by the auth-code login flow (includes openid + drive)
 export const GOOGLE_AUTH_SCOPE =

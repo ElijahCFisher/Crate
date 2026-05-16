@@ -28,6 +28,7 @@ export default function FriendsPanel({
   sharedWith,
   userProfile,
   dataFileId,
+  picturesFolderId,
   onAddToFollowing,
   onRemoveFromFollowing,
   onRemoveFromRequestedToFollow,
@@ -212,6 +213,7 @@ export default function FriendsPanel({
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         dataFileId={dataFileId}
+        picturesFolderId={picturesFolderId}
         onShared={(email) => onAddToSharedWith({ email, displayName: email })}
       />
 

@@ -9,7 +9,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import { shareFile } from '../../services/driveService';
 
-export default function ShareDialog({ open, onClose, dataFileId, onShared }) {
+export default function ShareDialog({ open, onClose, dataFileId, picturesFolderId, onShared }) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -28,6 +28,7 @@ export default function ShareDialog({ open, onClose, dataFileId, onShared }) {
     setError(null);
     try {
       await shareFile(dataFileId, email.trim());
+      if (picturesFolderId) await shareFile(picturesFolderId, email.trim());
       setSuccess(true);
       if (onShared) onShared(email.trim());
       setTimeout(handleClose, 1200);

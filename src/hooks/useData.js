@@ -10,7 +10,7 @@ import {
   createModificationChange,
   createDeletionChange,
 } from '../utils/changelogUtils';
-import { DRIVE_FOLDER_NAME, DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME } from '../config';
+import { DRIVE_FOLDER_NAME, DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME, DRIVE_PICTURES_FOLDER_NAME } from '../config';
 
 // ── Offline persistence helpers ───────────────────────────────────────────────
 const CACHE_KEY  = 'food_ratings_data_cache_v1';
@@ -62,7 +62,8 @@ export function useData(isAuthenticated) {
   const [changelog, setChangelog]       = useState([]);
   const [combinedFileId, setCombinedFileId] = useState(null);
   const [changelogFileId, setChangelogFileId] = useState(null);
-  const [folderId, setFolderId]         = useState(null);
+  const [folderId, setFolderId]               = useState(null);
+  const [picturesFolderId, setPicturesFolderId] = useState(null);
   const [loading, setLoading]       = useState(false);
   const [syncing, setSyncing]       = useState(false);
   const [syncError, setSyncError]   = useState(null);
@@ -131,10 +132,12 @@ export function useData(isAuthenticated) {
         const resolvedFolderId = await driveService.findOrCreateFolder(DRIVE_FOLDER_NAME);
         setFolderId(resolvedFolderId);
 
-        const [combinedId, changelogId] = await Promise.all([
+        const [combinedId, changelogId, picsFolderId] = await Promise.all([
           driveService.findOrCreateFile(resolvedFolderId, DRIVE_FILE_NAME),
           driveService.findOrCreateFile(resolvedFolderId, DRIVE_CHANGELOG_FILE_NAME),
+          driveService.findOrCreateSubfolder(resolvedFolderId, DRIVE_PICTURES_FOLDER_NAME),
         ]);
+        setPicturesFolderId(picsFolderId);
         setCombinedFileId(combinedId);  combinedFileIdRef.current  = combinedId;
         setChangelogFileId(changelogId); changelogFileIdRef.current = changelogId;
 
@@ -781,7 +784,7 @@ export function useData(isAuthenticated) {
 
   return {
     combined, changelog, categories, foodEntries,
-    fileId: combinedFileId, folderId, loading, syncing, syncError, setSyncError,
+    fileId: combinedFileId, folderId, picturesFolderId, loading, syncing, syncError, setSyncError,
     isOffline, pendingCount,
     addEntry, addEntryGroups, addEntriesWithLinks, addCategory, modifyEntry, deleteEntry,
     importCsv, exportCsv,
