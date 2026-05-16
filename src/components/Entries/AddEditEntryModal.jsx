@@ -331,6 +331,7 @@ export default function AddEditEntryModal({
   const [filenameLookup, setFilenameLookup] = useState('');
   const [filenameLookupStatus, setFilenameLookupStatus] = useState(null); // 'found' | 'not_found' | 'searching'
   const photoInputRef = useRef(null);
+  const photoGalleryRef = useRef(null);
   const highlightedSuggestionsRef = useRef({});
 
   useEffect(() => {
@@ -699,6 +700,14 @@ export default function AddEditEntryModal({
             ref={photoInputRef}
             type="file"
             accept="image/*"
+            capture="environment"
+            style={{ display: 'none' }}
+            onChange={(e) => handlePhotoSelect(e.target.files?.[0], onChange)}
+          />
+          <input
+            ref={photoGalleryRef}
+            type="file"
+            accept="image/*"
             style={{ display: 'none' }}
             onChange={(e) => handlePhotoSelect(e.target.files?.[0], onChange)}
           />
@@ -710,15 +719,25 @@ export default function AddEditEntryModal({
               {photoUploading ? (
                 <CircularProgress size={20} />
               ) : (
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<CameraAltIcon fontSize="small" />}
-                  onClick={() => photoInputRef.current?.click()}
-                  disabled={!picturesFolderId}
-                >
-                  {values.picture ? 'Replace' : 'Upload'}
-                </Button>
+                <>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<CameraAltIcon fontSize="small" />}
+                    onClick={() => photoInputRef.current?.click()}
+                    disabled={!picturesFolderId}
+                  >
+                    Camera
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => photoGalleryRef.current?.click()}
+                    disabled={!picturesFolderId}
+                  >
+                    {values.picture ? 'Replace' : 'Upload'}
+                  </Button>
+                </>
               )}
               {values.picture && !photoUploading && (
                 <IconButton size="small" onClick={() => onChange('picture', '')}>
