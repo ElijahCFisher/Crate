@@ -14,6 +14,7 @@ import BulkAddsPanel from '../BulkAdds/BulkAddsPanel';
 import FriendsPanel from '../Friends/FriendsPanel';
 import FollowRequestDialog from '../Friends/FollowRequestDialog';
 import SettingsPage from '../Settings/SettingsPage';
+import NotesPanel from '../Notes/NotesPanel';
 import { useSettings } from '../../hooks/useSettings';
 
 function decodeFollowRequest(encoded) {
@@ -63,6 +64,9 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
 
   // Tab
   const [tab, setTab] = useState('entries');
+
+  // Notes (local for now — not yet synced to Drive)
+  const [notes, setNotes] = useState('');
 
   // Modal state
   const [addEditOpen, setAddEditOpen] = useState(false);
@@ -245,6 +249,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
             label={`Friends${following.length ? ` (${following.length})` : ''}`}
             value="friends"
           />
+          <Tab label="Notes" value="notes" />
           <Tab label="Settings" value="settings" />
         </Tabs>
 
@@ -275,6 +280,10 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
             combined={combined}
             onOpen={openFromBulk}
           />
+        )}
+
+        {tab === 'notes' && (
+          <NotesPanel notes={notes} onChange={setNotes} />
         )}
 
         {tab === 'settings' && (
