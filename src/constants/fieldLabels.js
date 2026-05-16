@@ -6,4 +6,4 @@ export const LABEL_LOCATION = 'Location';
 export const LABEL_DATE = 'Date Rated';
 export const LABEL_ADDITIONAL_INFO = 'Additional Information';
 export const LABEL_NOTES = 'Notes';
-export const LABEL_PICTURE = 'Picture URL';
+export const LABEL_PICTURE = 'Picture';

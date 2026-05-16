@@ -23,7 +23,7 @@ import ReplayIcon from '@mui/icons-material/Replay';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import ClearIcon from '@mui/icons-material/Clear';
 import { CategorySelect } from '../Categories/CategorySelector';
-import { uploadPhoto } from '../../services/driveService';
+import { uploadPhoto, findFileInFolder } from '../../services/driveService';
 import DriveImage from '../DriveImage';
 import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
 import { evalAdditionalInfo, hasExpressions } from '../../utils/mathUtils';
@@ -328,6 +328,8 @@ export default function AddEditEntryModal({
   const [showIdenticalsEditor, setShowIdenticalsEditor] = useState(false);
   const [formKey, setFormKey] = useState(0);
   const [photoUploading, setPhotoUploading] = useState(false);
+  const [filenameLookup, setFilenameLookup] = useState('');
+  const [filenameLookupStatus, setFilenameLookupStatus] = useState(null); // 'found' | 'not_found' | 'searching'
   const photoInputRef = useRef(null);
   const highlightedSuggestionsRef = useRef({});
 
@@ -371,6 +373,25 @@ export default function AddEditEntryModal({
         if (option) onChange(field, option);
       },
     };
+  }
+
+  async function handleFilenameLookup(onChange) {
+    const name = filenameLookup.trim();
+    if (!name || !picturesFolderId) return;
+    setFilenameLookupStatus('searching');
+    try {
+      const fileId = await findFileInFolder(picturesFolderId, name);
+      if (fileId) {
+        onChange('picture', fileId);
+        setFilenameLookup('');
+        setFilenameLookupStatus('found');
+        setTimeout(() => setFilenameLookupStatus(null), 2000);
+      } else {
+        setFilenameLookupStatus('not_found');
+      }
+    } catch {
+      setFilenameLookupStatus('not_found');
+    }
   }
 
   async function handlePhotoSelect(file, onChange) {
@@ -678,7 +699,6 @@ export default function AddEditEntryModal({
             ref={photoInputRef}
             type="file"
             accept="image/*"
-            capture="environment"
             style={{ display: 'none' }}
             onChange={(e) => handlePhotoSelect(e.target.files?.[0], onChange)}
           />
@@ -697,7 +717,7 @@ export default function AddEditEntryModal({
                   onClick={() => photoInputRef.current?.click()}
                   disabled={!picturesFolderId}
                 >
-                  {values.picture ? 'Replace' : 'Add Photo'}
+                  {values.picture ? 'Replace' : 'Upload'}
                 </Button>
               )}
               {values.picture && !photoUploading && (
@@ -705,6 +725,31 @@ export default function AddEditEntryModal({
                   <ClearIcon fontSize="small" />
                 </IconButton>
               )}
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <TextField
+                size="small"
+                placeholder="Or paste filename from Drive folder…"
+                value={filenameLookup}
+                onChange={(e) => { setFilenameLookup(e.target.value); setFilenameLookupStatus(null); }}
+                onKeyDown={(e) => e.key === 'Enter' && handleFilenameLookup(onChange)}
+                disabled={!picturesFolderId || filenameLookupStatus === 'searching'}
+                sx={{ flex: 1 }}
+                error={filenameLookupStatus === 'not_found'}
+                helperText={
+                  filenameLookupStatus === 'not_found' ? 'File not found in Pictures folder' :
+                  filenameLookupStatus === 'found' ? 'Linked!' : undefined
+                }
+                FormHelperTextProps={{ sx: { color: filenameLookupStatus === 'found' ? 'success.main' : undefined } }}
+              />
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => handleFilenameLookup(onChange)}
+                disabled={!filenameLookup.trim() || !picturesFolderId || filenameLookupStatus === 'searching'}
+              >
+                {filenameLookupStatus === 'searching' ? <CircularProgress size={16} /> : 'Link'}
+              </Button>
             </Box>
             {values.picture && !values.picture.startsWith('http') && (
               <DriveImage fileId={values.picture} height={160} style={{ maxWidth: '100%' }} />

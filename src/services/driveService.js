@@ -171,6 +171,15 @@ export async function findOrCreateSubfolder(parentFolderId, name) {
   return folder.id;
 }
 
+export async function findFileInFolder(folderId, name) {
+  const query = `name='${name}' and '${folderId}' in parents and trashed=false`;
+  const res = await driveRequest(
+    `${DRIVE_API}/files?q=${encodeURIComponent(query)}&fields=files(id,name)&spaces=drive`
+  );
+  const data = await res.json();
+  return data.files?.[0]?.id ?? null;
+}
+
 export async function uploadPhoto(folderId, uuid, file) {
   const mimeType = file.type || 'image/jpeg';
   const ext = mimeType.split('/')[1]?.split('+')[0] || 'jpg';
