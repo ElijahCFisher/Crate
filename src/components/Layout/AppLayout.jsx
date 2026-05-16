@@ -16,6 +16,7 @@ import FollowRequestDialog from '../Friends/FollowRequestDialog';
 import SettingsPage from '../Settings/SettingsPage';
 import NotesPanel from '../Notes/NotesPanel';
 import { useSettings } from '../../hooks/useSettings';
+import { shareFile } from '../../services/driveService';
 
 function decodeFollowRequest(encoded) {
   try {
@@ -78,6 +79,14 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
 
   // Follow request from URL
   const [followRequester, setFollowRequester] = useState(null);
+
+  // Grandfather existing sharedWith people into the Pictures folder
+  useEffect(() => {
+    if (!picturesFolderId || !sharedWith?.length) return;
+    for (const person of sharedWith) {
+      if (person?.email) shareFile(picturesFolderId, person.email).catch(() => {});
+    }
+  }, [picturesFolderId, sharedWith]);
 
   // Detect ?followRequest= in the URL on load (and after auth)
   useEffect(() => {

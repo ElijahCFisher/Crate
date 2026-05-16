@@ -22,6 +22,7 @@ import AddIcon from '@mui/icons-material/Add';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import FilterBar from '../Filters/FilterBar';
+import DriveImage from '../DriveImage';
 import {
   applyFilterLogicGroup,
   applyFilters,
@@ -59,9 +60,9 @@ const COLUMNS = [
   { id: 'additionalInfo', label: LABEL_NOTES, sortable: false },
 ];
 
-// Total column count = expand cell + data columns + (optional) actions column
-const TOTAL_COLS = COLUMNS.length + 2;
-const TOTAL_COLS_READONLY = COLUMNS.length + 1;
+// Total column count = expand cell + picture cell + data columns + (optional) actions column
+const TOTAL_COLS = COLUMNS.length + 3;
+const TOTAL_COLS_READONLY = COLUMNS.length + 2;
 
 function ScoreBadge({ score, displayScore }) {
   if (score == null) return <Typography variant="body2" color="text.disabled">—</Typography>;
@@ -415,6 +416,16 @@ export default function EntryTable({
           ) : null}
         </TableCell>
 
+        {/* Picture thumbnail */}
+        <TableCell sx={{ width: 52, p: 0.5 }}>
+          {entry.picture && !entry.picture.startsWith('http') && (
+            <DriveImage fileId={entry.picture} height={40} />
+          )}
+          {entry.picture && entry.picture.startsWith('http') && (
+            <img src={entry.picture} alt="" style={{ height: 40, maxWidth: 52, objectFit: 'cover', borderRadius: 3, display: 'block' }} />
+          )}
+        </TableCell>
+
         <TableCell>
           {categoryMap.get(entry.ratingCategory) ? (
             <Chip
@@ -512,6 +523,8 @@ export default function EntryTable({
             <TableRow>
               {/* Narrow expand-toggle column */}
               <TableCell sx={{ width: 36, p: 0 }} />
+              {/* Picture thumbnail column */}
+              <TableCell sx={{ width: 52, p: 0 }} />
               {COLUMNS.map((col) => (
                 <TableCell key={col.id} align={col.align}>
                   {col.sortable ? (

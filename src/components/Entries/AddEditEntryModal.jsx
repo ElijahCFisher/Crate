@@ -23,7 +23,8 @@ import ReplayIcon from '@mui/icons-material/Replay';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import ClearIcon from '@mui/icons-material/Clear';
 import { CategorySelect } from '../Categories/CategorySelector';
-import { uploadPhoto, fetchPhotoBlob } from '../../services/driveService';
+import { uploadPhoto } from '../../services/driveService';
+import DriveImage from '../DriveImage';
 import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
 import { evalAdditionalInfo, hasExpressions } from '../../utils/mathUtils';
 import {
@@ -292,26 +293,6 @@ function entriesToForm(entries) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-function DriveImage({ fileId }) {
-  const [src, setSrc] = useState(null);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    if (!fileId) return;
-    let objectUrl;
-    fetchPhotoBlob(fileId)
-      .then((blob) => {
-        objectUrl = URL.createObjectURL(blob);
-        setSrc(objectUrl);
-      })
-      .catch(() => setError(true));
-    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [fileId]);
-
-  if (error) return <Typography variant="caption" color="error">Failed to load photo</Typography>;
-  if (!src) return <CircularProgress size={20} />;
-  return <img src={src} alt="Rating photo" style={{ maxHeight: 160, maxWidth: '100%', borderRadius: 4, display: 'block' }} />;
-}
 
 export default function AddEditEntryModal({
   open,
@@ -726,7 +707,7 @@ export default function AddEditEntryModal({
               )}
             </Box>
             {values.picture && !values.picture.startsWith('http') && (
-              <DriveImage fileId={values.picture} />
+              <DriveImage fileId={values.picture} height={160} style={{ maxWidth: '100%' }} />
             )}
             {values.picture && values.picture.startsWith('http') && (
               <img src={values.picture} alt="Rating photo" style={{ maxHeight: 160, maxWidth: '100%', borderRadius: 4, display: 'block' }} />
