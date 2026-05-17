@@ -62,13 +62,11 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     requestedToFollow, addToRequestedToFollow, removeFromRequestedToFollow,
     sharedWith, addToSharedWith,
     showAdvancedByDefault, updateShowAdvancedByDefault,
+    notes, updateNotes,
   } = useSettings(folderId);
 
   // Tab
   const [tab, setTab] = useState('entries');
-
-  // Notes (local for now — not yet synced to Drive)
-  const [notes, setNotes] = useState('');
 
   // Modal state
   const [addEditOpen, setAddEditOpen] = useState(false);
@@ -293,7 +291,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         )}
 
         {tab === 'notes' && (
-          <NotesPanel notes={notes} onChange={setNotes} />
+          <NotesPanel notes={notes} onChange={updateNotes} />
         )}
 
         {tab === 'settings' && (

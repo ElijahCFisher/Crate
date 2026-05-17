@@ -7,6 +7,7 @@ const DEFAULT_SETTINGS = {
   requestedToFollow: [], // [{ email, displayName }]
   sharedWith: [],        // [{ email, displayName }]
   showAdvancedByDefault: false,
+  notes: '',
 };
 
 export async function getOrCreateSettingsFile(folderId) {
