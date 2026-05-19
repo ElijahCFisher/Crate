@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import CircularProgress from '@mui/material/CircularProgress';
 import { fetchPhotoBlob } from '../services/driveService';
 
-export default function DriveImage({ fileId, height = 120, style }) {
+export default function DriveImage({ fileId, height = 120, style, onClick }) {
   const [src, setSrc] = useState(null);
   const [error, setError] = useState(false);
 
@@ -24,6 +24,7 @@ export default function DriveImage({ fileId, height = 120, style }) {
     <img
       src={src}
       alt=""
+      onClick={onClick}
       style={{ height, maxWidth: height * 2, objectFit: 'cover', borderRadius: 3, display: 'block', ...style }}
     />
   );

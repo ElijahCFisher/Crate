@@ -25,6 +25,7 @@ import ClearIcon from '@mui/icons-material/Clear';
 import { CategorySelect } from '../Categories/CategorySelector';
 import { uploadPhoto, findFileInFolder } from '../../services/driveService';
 import DriveImage from '../DriveImage';
+import ImageLightbox from '../ImageLightbox';
 import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
 import { evalAdditionalInfo, hasExpressions } from '../../utils/mathUtils';
 import {
@@ -330,6 +331,7 @@ export default function AddEditEntryModal({
   const [photoUploading, setPhotoUploading] = useState(false);
   const [filenameLookup, setFilenameLookup] = useState('');
   const [filenameLookupStatus, setFilenameLookupStatus] = useState(null); // 'found' | 'not_found' | 'searching'
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const photoInputRef = useRef(null);
   const photoGalleryRef = useRef(null);
   const highlightedSuggestionsRef = useRef({});
@@ -771,10 +773,20 @@ export default function AddEditEntryModal({
               </Button>
             </Box>
             {values.picture && !values.picture.startsWith('http') && (
-              <DriveImage fileId={values.picture} height={160} style={{ maxWidth: '100%' }} />
+              <DriveImage
+                fileId={values.picture}
+                height={160}
+                style={{ maxWidth: '100%', cursor: 'zoom-in' }}
+                onClick={() => setLightboxOpen(true)}
+              />
             )}
             {values.picture && values.picture.startsWith('http') && (
-              <img src={values.picture} alt="Rating photo" style={{ maxHeight: 160, maxWidth: '100%', borderRadius: 4, display: 'block' }} />
+              <img
+                src={values.picture}
+                alt="Rating photo"
+                onClick={() => setLightboxOpen(true)}
+                style={{ maxHeight: 160, maxWidth: '100%', borderRadius: 4, display: 'block', cursor: 'zoom-in' }}
+              />
             )}
           </Box>
         </Grid>
@@ -818,6 +830,7 @@ export default function AddEditEntryModal({
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
+    <>
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <form onSubmit={handleSubmit}>
         <DialogTitle>{isEdit ? 'Edit Entry' : isBulkEdit ? 'Bulk Add' : 'Add Entry'}</DialogTitle>
@@ -1038,5 +1051,12 @@ export default function AddEditEntryModal({
         </DialogActions>
       </form>
     </Dialog>
+    <ImageLightbox
+      open={lightboxOpen}
+      onClose={() => setLightboxOpen(false)}
+      src={form.picture?.startsWith('http') ? form.picture : undefined}
+      fileId={form.picture && !form.picture.startsWith('http') ? form.picture : undefined}
+    />
+    </>
   );
 }
