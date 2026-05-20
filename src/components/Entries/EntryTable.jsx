@@ -19,6 +19,7 @@ import TextField from '@mui/material/TextField';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import FindReplaceIcon from '@mui/icons-material/FindReplace';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import FilterBar from '../Filters/FilterBar';
@@ -151,6 +152,7 @@ export default function EntryTable({
   onAdd,
   onEdit,
   onDelete,
+  onOpenFindReplace,
   readOnly = false,
 }) {
   const [filters, setFilters] = useState(() => loadPrefs()?.filters || [makeDefaultFilter()]);
@@ -514,6 +516,13 @@ export default function EntryTable({
                 </Typography>
               }
             />
+          )}
+          {!readOnly && onOpenFindReplace && (
+            <Tooltip title="Find & Replace (Ctrl+H)">
+              <Button variant="outlined" startIcon={<FindReplaceIcon />} onClick={onOpenFindReplace} size="small">
+                Find &amp; Replace
+              </Button>
+            </Tooltip>
           )}
           {!readOnly && (
             <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd} size="small">

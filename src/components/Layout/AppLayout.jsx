@@ -14,6 +14,7 @@ import BulkAddsPanel from '../BulkAdds/BulkAddsPanel';
 import FriendsPanel from '../Friends/FriendsPanel';
 import FollowRequestDialog from '../Friends/FollowRequestDialog';
 import SettingsPage from '../Settings/SettingsPage';
+import FindReplaceDialog from '../Entries/FindReplaceDialog';
 import NotesPanel from '../Notes/NotesPanel';
 import { useSettings } from '../../hooks/useSettings';
 import { shareFile } from '../../services/driveService';
@@ -74,6 +75,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
   const [bulkAddEntries, setBulkAddEntries] = useState(null);
   const [deleteDialogEntry, setDeleteDialogEntry] = useState(null);
   const [exportImportOpen, setExportImportOpen] = useState(false);
+  const [findReplaceOpen, setFindReplaceOpen] = useState(false);
 
   // Follow request from URL
   const [followRequester, setFollowRequester] = useState(null);
@@ -106,7 +108,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     function handleKeyDown(e) {
       if (
         e.key !== 'n' ||
-        addEditOpen || deleteDialogEntry || exportImportOpen || followRequester ||
+        addEditOpen || deleteDialogEntry || exportImportOpen || followRequester || findReplaceOpen ||
         document.activeElement.tagName === 'INPUT' ||
         document.activeElement.tagName === 'TEXTAREA' ||
         document.activeElement.isContentEditable
@@ -115,6 +117,16 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
       setEditingEntry(null);
       setBulkAddEntries(null);
       setAddEditOpen(true);
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [addEditOpen, deleteDialogEntry, exportImportOpen, followRequester, findReplaceOpen]);
+
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if (e.key !== 'h' || !e.ctrlKey || addEditOpen || deleteDialogEntry || exportImportOpen || followRequester) return;
+      e.preventDefault();
+      setFindReplaceOpen(true);
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -218,6 +230,12 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     if (Object.keys(updates).length > 0) modifyEntry(editEntry.uuid, updates);
   }
 
+  function handleReplaceAll(changes) {
+    for (const { uuid, updates } of changes) {
+      modifyEntry(uuid, updates);
+    }
+  }
+
   function handleDeleteConfirm() {
     if (!deleteDialogEntry) return;
     deleteEntry(deleteDialogEntry.uuid);
@@ -287,6 +305,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
             onAdd={openAdd}
             onEdit={openEdit}
             onDelete={(entry) => setDeleteDialogEntry(entry)}
+            onOpenFindReplace={() => setFindReplaceOpen(true)}
           />
         )}
 
@@ -369,6 +388,14 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         exportCsv={exportCsv}
         onImportCsv={importCsv}
         syncing={syncing}
+      />
+
+      {/* Find & Replace */}
+      <FindReplaceDialog
+        open={findReplaceOpen}
+        onClose={() => setFindReplaceOpen(false)}
+        foodEntries={foodEntries}
+        onReplaceAll={handleReplaceAll}
       />
 
       {/* Follow request from link */}
