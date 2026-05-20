@@ -102,6 +102,23 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     }
   }, [auth.isAuthenticated, dataFileId]);
 
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if (
+        e.key !== 'n' ||
+        addEditOpen || deleteDialogEntry || exportImportOpen || followRequester ||
+        document.activeElement.tagName === 'INPUT' ||
+        document.activeElement.tagName === 'TEXTAREA' ||
+        document.activeElement.isContentEditable
+      ) return;
+      setEditingEntry(null);
+      setBulkAddEntries(null);
+      setAddEditOpen(true);
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [addEditOpen, deleteDialogEntry, exportImportOpen, followRequester]);
+
   function openAdd() {
     setEditingEntry(null);
     setBulkAddEntries(null);

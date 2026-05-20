@@ -625,7 +625,7 @@ export default function AddEditEntryModal({
 
   // ── Field render helpers ──────────────────────────────────────────────────
 
-  function renderSimpleSharedFields(values, onChange) {
+  function renderSimpleSharedFields(values, onChange, autoFocusFirst = false) {
     return (
       <>
         <Grid item xs={12} sm={6}>
@@ -639,7 +639,7 @@ export default function AddEditEntryModal({
             }}
             {...suggestionCommitProps('restaurantName', onChange)}
             renderInput={(params) => (
-              <TextField {...params} label={LABEL_RESTAURANT} size="small" fullWidth />
+              <TextField {...params} label={LABEL_RESTAURANT} size="small" fullWidth autoFocus={autoFocusFirst} />
             )}
           />
         </Grid>
@@ -854,7 +854,7 @@ export default function AddEditEntryModal({
 
             {/* Simple shared fields: Restaurant/Brand + Food Name */}
             {/* In add mode: shown here (before score). In edit mode: shown after divider below. */}
-            {!isEdit && renderSimpleSharedFields(form, setShared)}
+            {!isEdit && renderSimpleSharedFields(form, setShared, true)}
 
             {/* Category: always in edit, advanced-only in add */}
             {(isEdit || showAdvanced) && (
@@ -914,7 +914,7 @@ export default function AddEditEntryModal({
             {(isEdit || showAdvanced) && (
               <>
                 <Grid item xs={12}><Divider /></Grid>
-                {isEdit && renderSimpleSharedFields(form, setShared)}
+                {isEdit && renderSimpleSharedFields(form, setShared, true)}
                 {renderAdvancedSharedFields(
                   form,
                   setShared,

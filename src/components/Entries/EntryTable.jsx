@@ -270,6 +270,23 @@ export default function EntryTable({
     });
   }, [searchedEntries, order, orderBy, categoryMap]);
 
+  useEffect(() => {
+    if (readOnly) return;
+    function handleKeyDown(e) {
+      if (
+        e.key !== 'e' ||
+        !sortedEntries.length ||
+        document.activeElement.tagName === 'INPUT' ||
+        document.activeElement.tagName === 'TEXTAREA' ||
+        document.activeElement.isContentEditable ||
+        document.activeElement.closest('[role="dialog"]')
+      ) return;
+      onEdit(sortedEntries[0]);
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [sortedEntries, onEdit, readOnly]);
+
   // ── Identicals grouping ────────────────────────────────────────────────────
   // Entries that share UUIDs in their `identicals` arrays are merged into a
   // single group. Only the "primary" entry appears as a standalone row; the
