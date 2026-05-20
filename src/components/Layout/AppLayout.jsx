@@ -111,6 +111,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         document.activeElement.tagName === 'TEXTAREA' ||
         document.activeElement.isContentEditable
       ) return;
+      e.preventDefault();
       setEditingEntry(null);
       setBulkAddEntries(null);
       setAddEditOpen(true);

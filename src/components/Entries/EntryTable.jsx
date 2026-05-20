@@ -281,6 +281,7 @@ export default function EntryTable({
         document.activeElement.isContentEditable ||
         document.activeElement.closest('[role="dialog"]')
       ) return;
+      e.preventDefault();
       onEdit(sortedEntries[0]);
     }
     document.addEventListener('keydown', handleKeyDown);
