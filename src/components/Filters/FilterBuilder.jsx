@@ -16,7 +16,7 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import EditIcon from '@mui/icons-material/Edit';
 import {
   LABEL_RESTAURANT, LABEL_FOOD_NAME, LABEL_RATING,
-  LABEL_CATEGORY, LABEL_LOCATION, LABEL_NOTES,
+  LABEL_CATEGORY, LABEL_LOCATION, LABEL_NOTES, LABEL_DATE,
 } from '../../constants/fieldLabels';
 
 const FIELDS = [
@@ -27,6 +27,7 @@ const FIELDS = [
   { value: 'score', label: LABEL_RATING },
   { value: 'additionalInfo', label: LABEL_NOTES },
   { value: 'ratingCategory', label: LABEL_CATEGORY },
+  { value: 'dateRated', label: LABEL_DATE },
   { value: 'uuid', label: 'UUID' },
 ];
 
@@ -38,7 +39,16 @@ const TEXT_OPS = [
   { value: 'isNotEmpty', label: 'is not empty' },
 ];
 
+const DATE_OPS = [
+  { value: 'dateOn', label: 'on' },
+  { value: 'dateBefore', label: 'before' },
+  { value: 'dateAfter', label: 'after' },
+  { value: 'isEmpty', label: 'is empty' },
+  { value: 'isNotEmpty', label: 'is not empty' },
+];
+
 function getOps(field) {
+  if (field === 'dateRated') return DATE_OPS;
   return TEXT_OPS;
 }
 
@@ -93,7 +103,8 @@ export function applyFilterGroup(entries, group, categories) {
 
 export function describeFilter(filter) {
   const fieldLabel = FIELDS.find((field) => field.value === filter.field)?.label || filter.field;
-  const opLabel = TEXT_OPS.find((op) => op.value === filter.op)?.label || filter.op;
+  const allOps = [...TEXT_OPS, ...DATE_OPS];
+  const opLabel = allOps.find((op) => op.value === filter.op)?.label || filter.op;
   const value = needsValue(filter) ? ` "${filter.value}"` : '';
   return `${fieldLabel} ${opLabel}${value}`;
 }
@@ -305,6 +316,21 @@ function makeCategoryMap(categories) {
 function matchFilter(entry, filter, catMap) {
   const { field, op, value, caseSensitive, useRegex } = filter;
 
+  // Date field: compare ms timestamps against a YYYY-MM-DD date input
+  if (field === 'dateRated') {
+    const ms = entry.dateRated;
+    if (op === 'isEmpty') return ms == null;
+    if (op === 'isNotEmpty') return ms != null;
+    if (!value) return false;
+    // Compare by date only (strip time from the entry's timestamp)
+    const entryDate = new Date(ms);
+    const entryStr = `${entryDate.getFullYear()}-${String(entryDate.getMonth() + 1).padStart(2, '0')}-${String(entryDate.getDate()).padStart(2, '0')}`;
+    if (op === 'dateOn') return entryStr === value;
+    if (op === 'dateBefore') return entryStr < value;
+    if (op === 'dateAfter') return entryStr > value;
+    return false;
+  }
+
   // UUID field: exact match only (no partial substring matching)
   if (field === 'uuid') {
     const uuid = String(entry.uuid ?? '');
@@ -490,7 +516,17 @@ export default function FilterBuilder({
           </Select>
 
           {/* Value input */}
-          {needsValue(f) && f.field !== 'score' && (
+          {needsValue(f) && f.field === 'dateRated' && (
+            <TextField
+              type="date"
+              value={f.value}
+              onChange={(e) => update(f.id, { value: e.target.value })}
+              size="small"
+              InputLabelProps={{ shrink: true }}
+              sx={{ width: 160 }}
+            />
+          )}
+          {needsValue(f) && f.field !== 'score' && f.field !== 'dateRated' && (
             <TextField
               value={f.value}
               onChange={(e) => update(f.id, { value: e.target.value })}
@@ -501,7 +537,7 @@ export default function FilterBuilder({
             />
           )}
           {/* Case-sensitive toggle */}
-          {needsValue(f) && (
+          {needsValue(f) && f.field !== 'dateRated' && (
             <Tooltip title={f.caseSensitive ? 'Case sensitive (on)' : 'Case sensitive (off)'}>
               <ToggleButton
                 value="caseSensitive"
@@ -516,7 +552,7 @@ export default function FilterBuilder({
           )}
 
           {/* Regex toggle */}
-          {needsValue(f) && (
+          {needsValue(f) && f.field !== 'dateRated' && (
             <Tooltip title={f.useRegex ? 'Regex (on)' : 'Regex (off)'}>
               <ToggleButton
                 value="useRegex"
