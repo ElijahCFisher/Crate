@@ -511,6 +511,19 @@ export default function AddEditEntryModal({
       return uuid;
     }
 
+    function toNewEntry(r) {
+      return {
+        restaurantName: r.restaurantName,
+        specifier: r.specifier,
+        location: r.location,
+        dateRated: r.dateRatedMs ?? dateInputToMs(r.dateRated),
+        additionalInfo: r.additionalInfo,
+        picture: r.picture,
+        ratingCategory: resolveCategory(r.newCategoryName, r.ratingCategory),
+        score: r.score !== '' ? r.score : null,
+      };
+    }
+
     if (isEdit) {
       const resolvedCategoryUuid = resolveCategory(
         form.primaryRating.newCategoryName,
@@ -518,8 +531,19 @@ export default function AddEditEntryModal({
       );
       const resolvedPrimary = { ...form.primaryRating, ratingCategory: resolvedCategoryUuid };
       const updates = computeDiff(entry, form, resolvedPrimary);
-      if (Object.keys(updates).length === 0) { onClose(); return; }
-      onSave(updates);
+
+      const primaryNew = form.additionalRatings.filter((r) => r.groupId === 'primary');
+      const otherNewByGroup = new Map();
+      for (const r of form.additionalRatings.filter((r) => r.groupId !== 'primary')) {
+        if (!otherNewByGroup.has(r.groupId)) otherNewByGroup.set(r.groupId, []);
+        otherNewByGroup.get(r.groupId).push(r);
+      }
+      const newGroupData = [];
+      if (primaryNew.length > 0) newGroupData.push({ entries: primaryNew.map(toNewEntry), existingUuids: [entry.uuid] });
+      for (const [, g] of otherNewByGroup) newGroupData.push({ entries: g.map(toNewEntry), existingUuids: [] });
+
+      if (Object.keys(updates).length === 0 && newGroupData.length === 0) { onClose(); return; }
+      onSave(updates, newGroupData);
     } else if (isBulkEdit) {
       const byUuid = new Map((initialEntries || []).map((orig) => [orig.uuid, orig]));
       const changes = [];
@@ -881,20 +905,18 @@ export default function AddEditEntryModal({
             </Grid>
 
             {/* Add / re-rate buttons */}
-            {!isEdit && (
-              <Grid item xs={3} sm={2} sx={{ display: 'flex', alignItems: 'center' }}>
-                <Tooltip title="Add another item from this visit (separate entry)">
-                  <IconButton size="small" onClick={addAdditionalRating} color="primary">
-                    <AddIcon />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Add a re-rating of this entry (linked as identical — same item, different visit)">
-                  <IconButton size="small" onClick={addIdenticalRating} sx={{ color: 'text.secondary' }}>
-                    <ReplayIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              </Grid>
-            )}
+            <Grid item xs={3} sm={2} sx={{ display: 'flex', alignItems: 'center' }}>
+              <Tooltip title="Add another item from this visit (separate entry)">
+                <IconButton size="small" onClick={addAdditionalRating} color="primary">
+                  <AddIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Add a re-rating of this entry (linked as identical — same item, different visit)">
+                <IconButton size="small" onClick={addIdenticalRating} sx={{ color: 'text.secondary' }}>
+                  <ReplayIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Grid>
 
             {/* Show / Hide Advanced toggle (add/bulk-edit mode only) */}
             {!isEdit && (
@@ -925,7 +947,7 @@ export default function AddEditEntryModal({
             )}
 
             {/* ── Additional ratings ───────────────────────────────────── */}
-            {!isEdit && (() => {
+            {(() => {
               const idxById = new Map(form.additionalRatings.map((r, i) => [r.id, i]));
 
               const seen = new Set(['primary']);
@@ -963,7 +985,7 @@ export default function AddEditEntryModal({
                     {renderSimpleSharedFields(r, (field, value) => setAdditional(idx, field, value))}
 
                     {/* Category: advanced-only */}
-                    {showAdvanced && (
+                    {(isEdit || showAdvanced) && (
                       <Grid item xs={12} sm={7}>
                         <CategorySelect
                           key={`additional-cat-${formKey}-${r.id}`}
@@ -977,7 +999,7 @@ export default function AddEditEntryModal({
                     )}
 
                     {/* Rating (score) — always visible */}
-                    <Grid item xs={9} sm={showAdvanced ? 3 : 4}>
+                    <Grid item xs={9} sm={(isEdit || showAdvanced) ? 3 : 4}>
                       <TextField
                         label={LABEL_RATING}
                         value={r.score}
@@ -1000,7 +1022,7 @@ export default function AddEditEntryModal({
                     </Grid>
 
                     {/* Advanced shared fields */}
-                    {showAdvanced && renderAdvancedSharedFields(
+                    {(isEdit || showAdvanced) && renderAdvancedSharedFields(
                       r,
                       (field, value) => setAdditional(idx, field, value),
                       (v) => setForm((f) => {

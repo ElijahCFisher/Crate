@@ -260,6 +260,40 @@ export async function importEntries(fileIds, entries, newCategories) {
 }
 
 /**
+ * Batch-update the `score` field on multiple entries in a single atomic Drive write.
+ * `updates` is a Map<uuid, newScore> (or any iterable of [uuid, score] pairs).
+ * All changes share the given changeMethod so the audit trail is clear.
+ */
+export async function batchModifyScores(fileIds, updates, changeMethod) {
+  const now = Date.now();
+  const changes = [];
+  let idx = 0;
+  for (const [uuid, newScore] of updates) {
+    const change = createModificationChange(
+      uuid, 'score',
+      newScore != null ? String(newScore) : '',
+      changeMethod,
+    );
+    change.dateOfChange = now + idx++;
+    changes.push(change);
+  }
+
+  return applyChanges(fileIds, changes, (data) => {
+    for (const change of changes) {
+      const entry = data.combined.get(change.entryUuid);
+      if (!entry) continue;
+      if (isLatestChangeForField(data.changelog, change)) {
+        data.combined.set(change.entryUuid, {
+          ...entry,
+          score: change.value !== '' ? change.value : null,
+        });
+      }
+    }
+    return {};
+  });
+}
+
+/**
  * Replay a changelog-only CSV against the current data set.
  * Existing change UUIDs are ignored so importing the same partial log is
  * idempotent.

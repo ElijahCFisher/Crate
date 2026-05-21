@@ -41,10 +41,12 @@ function ScoreBadge({ score }) {
 
 export default function CategoriesPanel({
   categories,
-  onAdd,       // (categoryData) => entry
-  onEdit,      // (editEntry, categoryData) — caller applies modifyEntry
-  onDelete,    // (entry)
+  combined,      // full Map<uuid, entry> — passed through to the edit dialog for rebalance
+  onAdd,         // (categoryData) => entry
+  onEdit,        // (editEntry, categoryData) — caller applies modifyEntry
+  onDelete,      // (entry)
   onAddCategory, // (categoryData) => entry  (for creating a parent on-the-fly)
+  onRebalance,   // (updates: Map<uuid, newScore>) => void
 }) {
   const [search, setSearch] = useState('');
   const [order, setOrder] = useState('asc');
@@ -257,8 +259,10 @@ export default function CategoriesPanel({
         editEntry={editingEntry}
         initialName=""
         categories={categories}
+        combined={combined}
         onSave={handleEditSave}
         onAddCategory={onAddCategory}
+        onRebalance={onRebalance}
         onClose={handleEditClose}
       />
 

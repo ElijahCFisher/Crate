@@ -51,6 +51,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     addCategory,
     modifyEntry,
     deleteEntry,
+    applyRebalance,
     importCsv,
     exportCsv,
     isOffline,
@@ -156,9 +157,12 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     setBulkAddEntries(null);
   }
 
-  function handleSave(payload) {
+  function handleSave(payload, newGroupData = []) {
     if (editingEntry) {
-      modifyEntry(editingEntry.uuid, payload);
+      if (Object.keys(payload).length > 0) modifyEntry(editingEntry.uuid, payload);
+      for (const { entries, existingUuids } of newGroupData) {
+        if (entries.length > 0) addEntriesWithLinks(entries, existingUuids);
+      }
       if ('identicals' in payload) {
         const nextIdenticals = payload.identicals || [];
         const nextSet = new Set(nextIdenticals);
@@ -312,10 +316,12 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         {tab === 'categories' && (
           <CategoriesPanel
             categories={categories}
+            combined={combined}
             onAdd={handleAddCategory}
             onEdit={handleEditCategory}
             onDelete={(entry) => deleteEntry(entry.uuid)}
             onAddCategory={handleAddCategory}
+            onRebalance={applyRebalance}
           />
         )}
 

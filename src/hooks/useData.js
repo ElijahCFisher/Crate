@@ -3,6 +3,8 @@ import { v4 as uuidv4 } from 'uuid';
 import * as driveService from '../services/driveService';
 import * as csvService from '../services/csvService';
 import * as dataService from '../services/dataService';
+
+const REBALANCE_CHANGE_METHOD = 'rebalancing from the app';
 import { detectImportFormat, importFromLegacyCsv } from '../utils/importUtils';
 import {
   computeCategories,
@@ -314,6 +316,7 @@ export function useData(isAuthenticated) {
         else if (op.type === 'addWithLinks') result = await dataService.addEntriesWithLinks(fids, op.entries, op.existingUuids);
         else if (op.type === 'modify')      result = await dataService.modifyEntry(fids, op.uuid, op.updates);
         else if (op.type === 'delete')      result = await dataService.deleteEntry(fids, op.uuid);
+        else if (op.type === 'batchModify') result = await dataService.batchModifyScores(fids, new Map(op.updates), op.changeMethod);
         if (result?.data) applyResult(result.data);
         else if (result?.combined) applyResult(result);
         remaining = remaining.filter((o) => o !== op);
@@ -777,6 +780,48 @@ export function useData(isAuthenticated) {
     return entries;
   }, []);
 
+  /**
+   * Batch-update scores for multiple entries (rebalancing). Applies locally
+   * immediately and syncs to Drive as one atomic write.
+   * `updates` is a Map<uuid, newScore>.
+   */
+  const applyRebalance = useCallback((updates) => {
+    const now = Date.now();
+    const changes = [];
+    let idx = 0;
+    for (const [uuid, newScore] of updates) {
+      const change = createModificationChange(
+        uuid, 'score',
+        newScore != null ? String(newScore) : '',
+        REBALANCE_CHANGE_METHOD,
+      );
+      change.dateOfChange = now + idx++;
+      changes.push(change);
+    }
+
+    const newChangelog = [...changelogRef.current, ...changes];
+    changelogRef.current = newChangelog;
+
+    let newCombined;
+    setCombined((prev) => {
+      const next = new Map(prev);
+      for (const [uuid, newScore] of updates) {
+        const e = next.get(uuid);
+        if (e) next.set(uuid, { ...e, score: newScore });
+      }
+      newCombined = next;
+      return next;
+    });
+    setChangelog((prev) => [...prev, ...changes]);
+
+    withSyncBackground(
+      (fids) => dataService.batchModifyScores(fids, updates, REBALANCE_CHANGE_METHOD),
+      { type: 'batchModify', updates: Array.from(updates.entries()), changeMethod: REBALANCE_CHANGE_METHOD },
+      newCombined,
+      newChangelog,
+    );
+  }, []);
+
   // ── Derived ─────────────────────────────────────────────────────────────────
 
   const categories  = Array.from(combined.values()).filter((e) => e.entryType === 'category');
@@ -787,6 +832,7 @@ export function useData(isAuthenticated) {
     fileId: combinedFileId, folderId, picturesFolderId, loading, syncing, syncError, setSyncError,
     isOffline, pendingCount,
     addEntry, addEntryGroups, addEntriesWithLinks, addCategory, modifyEntry, deleteEntry,
+    applyRebalance,
     importCsv, exportCsv,
   };
 }
