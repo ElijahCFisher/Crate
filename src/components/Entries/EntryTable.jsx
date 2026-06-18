@@ -24,6 +24,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import FilterBar from '../Filters/FilterBar';
 import DriveImage from '../DriveImage';
+import ImageLightbox from '../ImageLightbox';
 import {
   applyFilterLogicGroup,
   applyFilters,
@@ -162,6 +163,7 @@ export default function EntryTable({
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(() => loadPrefs()?.rowsPerPage || 20);
   const [showBaseScores, setShowBaseScores] = useState(() => loadPrefs()?.showBaseScores || false);
+  const [lightboxPicture, setLightboxPicture] = useState(null);
 
   useEffect(() => {
     savePrefs({ filters, filterLogic, order, orderBy, rowsPerPage, showBaseScores });
@@ -403,6 +405,15 @@ export default function EntryTable({
     });
   }
 
+  function openPictureLightbox(picture) {
+    if (!picture) return;
+    setLightboxPicture(
+      picture.startsWith('http')
+        ? { src: picture }
+        : { fileId: picture }
+    );
+  }
+
   // ── Row renderer ─────────────────────────────────────────────────────────
   // Used for both primary and secondary (expanded identical) rows.
 
@@ -439,10 +450,20 @@ export default function EntryTable({
         {/* Picture thumbnail */}
         <TableCell sx={{ width: 52, p: 0.5 }}>
           {entry.picture && !entry.picture.startsWith('http') && (
-            <DriveImage fileId={entry.picture} height={40} />
+            <DriveImage
+              fileId={entry.picture}
+              height={40}
+              onClick={() => openPictureLightbox(entry.picture)}
+              style={{ cursor: 'zoom-in' }}
+            />
           )}
           {entry.picture && entry.picture.startsWith('http') && (
-            <img src={entry.picture} alt="" style={{ height: 40, maxWidth: 52, objectFit: 'cover', borderRadius: 3, display: 'block' }} />
+            <img
+              src={entry.picture}
+              alt=""
+              onClick={() => openPictureLightbox(entry.picture)}
+              style={{ height: 40, maxWidth: 52, objectFit: 'cover', borderRadius: 3, display: 'block', cursor: 'zoom-in' }}
+            />
           )}
         </TableCell>
 
@@ -625,6 +646,13 @@ export default function EntryTable({
           rowsPerPageOptions={[10, 20, 50, 100]}
         />
       </Box>
+
+      <ImageLightbox
+        open={!!lightboxPicture}
+        onClose={() => setLightboxPicture(null)}
+        src={lightboxPicture?.src}
+        fileId={lightboxPicture?.fileId}
+      />
     </Box>
   );
 }
