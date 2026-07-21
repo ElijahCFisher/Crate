@@ -47,8 +47,20 @@ const DATE_OPS = [
   { value: 'isNotEmpty', label: 'is not empty' },
 ];
 
+const RATING_OPS = [
+  { value: 'ratingEquals', label: '=' },
+  { value: 'ratingNotEquals', label: '≠' },
+  { value: 'ratingGreater', label: '>' },
+  { value: 'ratingGreaterOrEqual', label: '≥' },
+  { value: 'ratingLess', label: '<' },
+  { value: 'ratingLessOrEqual', label: '≤' },
+  { value: 'isEmpty', label: 'is empty' },
+  { value: 'isNotEmpty', label: 'is not empty' },
+];
+
 function getOps(field) {
   if (field === 'dateRated') return DATE_OPS;
+  if (field === 'score') return RATING_OPS;
   return TEXT_OPS;
 }
 
@@ -103,7 +115,7 @@ export function applyFilterGroup(entries, group, categories) {
 
 export function describeFilter(filter) {
   const fieldLabel = FIELDS.find((field) => field.value === filter.field)?.label || filter.field;
-  const allOps = [...TEXT_OPS, ...DATE_OPS];
+  const allOps = [...TEXT_OPS, ...DATE_OPS, ...RATING_OPS];
   const opLabel = allOps.find((op) => op.value === filter.op)?.label || filter.op;
   const value = needsValue(filter) ? ` "${filter.value}"` : '';
   return `${fieldLabel} ${opLabel}${value}`;
@@ -331,6 +343,23 @@ function matchFilter(entry, filter, catMap) {
     return false;
   }
 
+  // Rating field: numeric comparison against entry.score
+  if (field === 'score') {
+    const score = entry.score != null ? parseFloat(entry.score) : NaN;
+    if (op === 'isEmpty') return !Number.isFinite(score);
+    if (op === 'isNotEmpty') return Number.isFinite(score);
+    if (!Number.isFinite(score)) return false;
+    const target = parseFloat(value);
+    if (!Number.isFinite(target)) return false;
+    if (op === 'ratingEquals') return score === target;
+    if (op === 'ratingNotEquals') return score !== target;
+    if (op === 'ratingGreater') return score > target;
+    if (op === 'ratingGreaterOrEqual') return score >= target;
+    if (op === 'ratingLess') return score < target;
+    if (op === 'ratingLessOrEqual') return score <= target;
+    return false;
+  }
+
   // UUID field: exact match only (no partial substring matching)
   if (field === 'uuid') {
     const uuid = String(entry.uuid ?? '');
@@ -526,6 +555,17 @@ export default function FilterBuilder({
               sx={{ width: 160 }}
             />
           )}
+          {needsValue(f) && f.field === 'score' && (
+            <TextField
+              type="number"
+              value={f.value}
+              onChange={(e) => update(f.id, { value: e.target.value })}
+              size="small"
+              placeholder="rating…"
+              inputProps={{ step: 0.1, min: 0, max: 10 }}
+              sx={{ width: 100 }}
+            />
+          )}
           {needsValue(f) && f.field !== 'score' && f.field !== 'dateRated' && (
             <TextField
               value={f.value}
@@ -537,7 +577,7 @@ export default function FilterBuilder({
             />
           )}
           {/* Case-sensitive toggle */}
-          {needsValue(f) && f.field !== 'dateRated' && (
+          {needsValue(f) && f.field !== 'dateRated' && f.field !== 'score' && (
             <Tooltip title={f.caseSensitive ? 'Case sensitive (on)' : 'Case sensitive (off)'}>
               <ToggleButton
                 value="caseSensitive"
@@ -552,7 +592,7 @@ export default function FilterBuilder({
           )}
 
           {/* Regex toggle */}
-          {needsValue(f) && f.field !== 'dateRated' && (
+          {needsValue(f) && f.field !== 'dateRated' && f.field !== 'score' && (
             <Tooltip title={f.useRegex ? 'Regex (on)' : 'Regex (off)'}>
               <ToggleButton
                 value="useRegex"

@@ -70,3 +70,33 @@ describe('filter OR groups', () => {
     ).toBe('Restaurant/Brand contains "Pizza Hut" OR Restaurant/Brand contains "Dominoes"');
   });
 });
+
+describe('rating filters', () => {
+  const ratingFilter = (op, value) => ([
+    { id: 1, field: 'score', op, value, connector: 'AND', caseSensitive: false, useRegex: false },
+  ]);
+
+  it('filters by equals', () => {
+    expect(applyFilters(entries, ratingFilter('ratingEquals', '8'), categories).map((e) => e.uuid)).toEqual(['1']);
+  });
+
+  it('filters by not equals', () => {
+    expect(applyFilters(entries, ratingFilter('ratingNotEquals', '8'), categories).map((e) => e.uuid)).toEqual(['2', '3', '4']);
+  });
+
+  it('filters by greater than', () => {
+    expect(applyFilters(entries, ratingFilter('ratingGreater', '8'), categories).map((e) => e.uuid)).toEqual(['3', '4']);
+  });
+
+  it('filters by greater than or equal', () => {
+    expect(applyFilters(entries, ratingFilter('ratingGreaterOrEqual', '8'), categories).map((e) => e.uuid)).toEqual(['1', '3', '4']);
+  });
+
+  it('filters by less than', () => {
+    expect(applyFilters(entries, ratingFilter('ratingLess', '8'), categories).map((e) => e.uuid)).toEqual(['2']);
+  });
+
+  it('filters by less than or equal', () => {
+    expect(applyFilters(entries, ratingFilter('ratingLessOrEqual', '8'), categories).map((e) => e.uuid)).toEqual(['1', '2']);
+  });
+});
