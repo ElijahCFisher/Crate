@@ -86,12 +86,26 @@ export async function readCombined(fileIds) {
   return csvService.parseCombined(content);
 }
 
-export async function addEntry(fileIds, entryData) {
-  const entry = { ...ENTRY_DEFAULTS, uuid: uuidv4(), dateRated: Date.now(), ...entryData };
-  const change = createAdditionChange(entry, CHANGE_METHOD);
-  return applyChanges(fileIds, [change], (data) => {
-    data.combined.set(entry.uuid, entry);
-    return { entry };
+/**
+ * Add one or more entries in a single atomic Drive write. When more than one
+ * entry is passed they're cross-linked via `identicals` — the same "visit
+ * group" mechanism the app's Rerate / "add another item from this visit"
+ * buttons use, browsable afterward in the Bulk Adds tab. Port of the
+ * original src/services/dataService.js addEntry (same signature/behavior).
+ */
+export async function addEntry(fileIds, entryDataArray) {
+  const raw = Array.isArray(entryDataArray) ? entryDataArray : [entryDataArray];
+  const entries = raw.map((d) => ({ ...ENTRY_DEFAULTS, uuid: uuidv4(), dateRated: Date.now(), ...d }));
+
+  if (entries.length > 1) {
+    const uuids = entries.map((e) => e.uuid);
+    entries.forEach((e, i) => { e.identicals = uuids.filter((_, j) => j !== i); });
+  }
+
+  const changes = entries.map((e) => createAdditionChange(e, CHANGE_METHOD));
+  return applyChanges(fileIds, changes, (data) => {
+    for (const e of entries) data.combined.set(e.uuid, e);
+    return { entries };
   });
 }
 

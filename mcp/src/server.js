@@ -82,6 +82,32 @@ function resolveCategory(categoryName, combined) {
   };
 }
 
+/** Shared add-rating field resolution (category name/uuid, score snap, date). Returns {entryData} or {error}. */
+function buildEntryData({ restaurantName, specifier, location, score, category, categoryUuid, notes, dateRated }, combined) {
+  let ratingCategory = categoryUuid || '';
+  if (!ratingCategory && category) {
+    const resolved = resolveCategory(category, combined);
+    if (resolved.error) return { error: resolved };
+    ratingCategory = resolved.uuid;
+  }
+  if (ratingCategory && !combined.has(ratingCategory)) {
+    return { error: { error: `categoryUuid ${ratingCategory} does not exist.` } };
+  }
+
+  return {
+    entryData: {
+      restaurantName,
+      specifier: specifier || '',
+      location: location || '',
+      score: String(roundToValidScore(score)),
+      additionalInfo: notes || '',
+      ratingCategory,
+      categories: ratingCategory ? dataService.computeCategories(ratingCategory, combined) : [],
+      dateRated: dateRated ? new Date(dateRated + 'T00:00:00').getTime() : Date.now(),
+    },
+  };
+}
+
 const server = new McpServer({ name: 'crate', version: '1.0.0' });
 
 server.registerTool(
@@ -153,50 +179,65 @@ server.registerTool(
   }
 );
 
+const ratingInput = {
+  restaurantName: z.string().min(1),
+  specifier: z.string().optional().describe('The specific food/dish name.'),
+  location: z.string().optional(),
+  score: z.number().min(0).max(10),
+  category: z.string().optional(),
+  categoryUuid: z.string().optional(),
+  notes: z.string().optional(),
+  dateRated: z.string().optional().describe('YYYY-MM-DD; defaults to today.'),
+};
+
 server.registerTool(
   'add_rating',
   {
     title: 'Add a food rating',
     description: `Add a new food/restaurant rating to Crate. Score is 0-10 and snaps to the app's valid scale (${VALID_SCORES.join(', ')}). Provide either "category" (exact category name, must already exist) or "categoryUuid" (from list_categories) — omit both to leave it uncategorized.`,
-    inputSchema: {
-      restaurantName: z.string().min(1),
-      specifier: z.string().optional().describe('The specific food/dish name.'),
-      location: z.string().optional(),
-      score: z.number().min(0).max(10),
-      category: z.string().optional(),
-      categoryUuid: z.string().optional(),
-      notes: z.string().optional(),
-      dateRated: z.string().optional().describe('YYYY-MM-DD; defaults to today.'),
-    },
+    inputSchema: ratingInput,
   },
-  async ({ restaurantName, specifier, location, score, category, categoryUuid, notes, dateRated }) => {
+  async (args) => {
     try {
       const fileIds = await getFileIds();
       const combined = await dataService.readCombined(fileIds);
 
-      let ratingCategory = categoryUuid || '';
-      if (!ratingCategory && category) {
-        const resolved = resolveCategory(category, combined);
-        if (resolved.error) return errorResult(new Error(JSON.stringify(resolved)));
-        ratingCategory = resolved.uuid;
-      }
-      if (ratingCategory && !combined.has(ratingCategory)) {
-        return errorResult(new Error(`categoryUuid ${ratingCategory} does not exist.`));
+      const built = buildEntryData(args, combined);
+      if (built.error) return errorResult(new Error(JSON.stringify(built.error)));
+
+      const { entries } = await dataService.addEntry(fileIds, built.entryData);
+      return text({ added: summarizeEntry(entries[0], combined) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+
+server.registerTool(
+  'add_rating_group',
+  {
+    title: 'Add a group of ratings from one visit',
+    description: `Add several ratings as one cross-linked group — the same thing the app's Rerate / "add another item from this visit" buttons do (e.g. several dishes from the same meal, or the same dish re-rated). The group is written in a single atomic Drive write and shows up together in the app's Bulk Adds tab. Same fields as add_rating, one object per entry; score snaps to the app's valid scale (${VALID_SCORES.join(', ')}).`,
+    inputSchema: {
+      entries: z.array(z.object(ratingInput)).min(2).max(50),
+    },
+  },
+  async ({ entries }) => {
+    try {
+      const fileIds = await getFileIds();
+      const combined = await dataService.readCombined(fileIds);
+
+      const built = entries.map((e, i) => ({ i, ...buildEntryData(e, combined) }));
+      const failed = built.filter((b) => b.error);
+      if (failed.length) {
+        return errorResult(new Error(JSON.stringify({
+          message: 'No entries were added — fix these and retry.',
+          problems: failed.map((b) => ({ index: b.i, ...b.error })),
+        })));
       }
 
-      const entryData = {
-        restaurantName,
-        specifier: specifier || '',
-        location: location || '',
-        score: String(roundToValidScore(score)),
-        additionalInfo: notes || '',
-        ratingCategory,
-        categories: ratingCategory ? dataService.computeCategories(ratingCategory, combined) : [],
-        dateRated: dateRated ? new Date(dateRated + 'T00:00:00').getTime() : Date.now(),
-      };
-
-      const { entry } = await dataService.addEntry(fileIds, entryData);
-      return text({ added: summarizeEntry(entry, combined) });
+      const { entries: added } = await dataService.addEntry(fileIds, built.map((b) => b.entryData));
+      return text({ addedCount: added.length, added: added.map((e) => summarizeEntry(e, combined)) });
     } catch (err) {
       return errorResult(err);
     }

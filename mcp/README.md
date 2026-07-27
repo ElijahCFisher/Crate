@@ -52,7 +52,8 @@ Add to your MCP config (`claude mcp add`, or edit `.mcp.json` /
 
 - `list_categories` — full category tree with uuids and paths.
 - `search_ratings` — filter by text, category, score range.
-- `add_rating` — add a new entry (score auto-snaps to the app's valid scale).
+- `add_rating` — add a single new entry (score auto-snaps to the app's valid scale).
+- `add_rating_group` — add several entries as one cross-linked group in one atomic write, same as the app's Rerate / "add another item from this visit" buttons; shows up together in the Bulk Adds tab.
 - `update_rating` — patch fields on an existing entry by uuid.
 - `delete_rating` — delete by uuid, requires `confirm: true`.
 
