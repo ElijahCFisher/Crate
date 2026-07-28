@@ -7,6 +7,7 @@ import * as dataService from './dataService.js';
 import * as settingsService from './settingsService.js';
 import { DRIVE_FOLDER_NAME, DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME } from './config.js';
 import { roundToValidScore, VALID_SCORES } from '../../src/utils/scaleUtils.js';
+import { applyFilters } from '../../src/utils/filterLogic.js';
 
 // ── Drive file-id resolution (cached per process) ───────────────────────────
 
@@ -136,42 +137,39 @@ server.registerTool(
   }
 );
 
+const FILTER_FIELDS = ['any', 'restaurantName', 'specifier', 'location', 'score', 'additionalInfo', 'ratingCategory', 'dateRated', 'uuid'];
+const FILTER_OPS = [
+  'contains', 'equals', 'notContains', 'isEmpty', 'isNotEmpty',
+  'dateOn', 'dateBefore', 'dateAfter',
+  'ratingEquals', 'ratingNotEquals', 'ratingGreater', 'ratingGreaterOrEqual', 'ratingLess', 'ratingLessOrEqual',
+];
+
+const filterInput = {
+  field: z.enum(FILTER_FIELDS),
+  op: z.enum(FILTER_OPS),
+  value: z.string().optional().default(''),
+  caseSensitive: z.boolean().optional().default(false),
+  useRegex: z.boolean().optional().default(false),
+  connector: z.enum(['AND', 'OR']).optional().default('AND').describe('How this filter combines with the PREVIOUS one in the array (ignored on the first filter).'),
+};
+
 server.registerTool(
   'search_ratings',
   {
     title: 'Search food ratings',
-    description: 'Search Crate food entries by free-text (restaurant/food/location/notes), category name, and/or score range. Returns up to `limit` matches.',
+    description: `Search Crate food entries — this calls the app's real filter engine (FilterBuilder.applyFilters), same fields/operators as the Filters panel in the app. Fields: ${FILTER_FIELDS.join(', ')}. Text ops (most fields): contains, equals, notContains, isEmpty, isNotEmpty. Date ops (field="dateRated"): dateOn, dateBefore, dateAfter, isEmpty, isNotEmpty — value is "YYYY-MM-DD". Rating ops (field="score"): ratingEquals, ratingNotEquals, ratingGreater, ratingGreaterOrEqual, ratingLess, ratingLessOrEqual, isEmpty, isNotEmpty — value is a number as a string, e.g. "7.5". Multiple filters combine left to right via each one's own "connector" (AND/OR) — same as the app's default un-edited logic; no parenthesized custom logic.`,
     inputSchema: {
-      query: z.string().optional().describe('Substring match against restaurant name, specifier, location, and notes (case-insensitive).'),
-      category: z.string().optional().describe('Substring match against the category path, e.g. "Pizza" or "Fast Food / Burgers".'),
-      minScore: z.number().min(0).max(10).optional(),
-      maxScore: z.number().min(0).max(10).optional(),
+      filters: z.array(z.object(filterInput)).min(1).max(20),
       limit: z.number().int().positive().max(200).default(25),
     },
   },
-  async ({ query, category, minScore, maxScore, limit }) => {
+  async ({ filters, limit }) => {
     try {
       const fileIds = await getFileIds();
       const combined = await dataService.readCombined(fileIds);
-      const q = query?.trim().toLowerCase();
-      const catQ = category?.trim().toLowerCase();
 
-      let results = foodEntries(combined);
-      if (q) {
-        results = results.filter((e) =>
-          [e.restaurantName, e.specifier, e.location, e.additionalInfo]
-            .join(' ').toLowerCase().includes(q)
-        );
-      }
-      if (catQ) {
-        results = results.filter((e) => categoryPath(e.ratingCategory, combined).toLowerCase().includes(catQ));
-      }
-      if (minScore != null) {
-        results = results.filter((e) => e.score != null && parseFloat(e.score) >= minScore);
-      }
-      if (maxScore != null) {
-        results = results.filter((e) => e.score != null && parseFloat(e.score) <= maxScore);
-      }
+      const withIds = filters.map((f, i) => ({ id: i, ...f }));
+      const results = applyFilters(foodEntries(combined), withIds, categoryEntries(combined));
 
       const total = results.length;
       const page = results.slice(0, limit).map((e) => summarizeEntry(e, combined));
@@ -197,28 +195,30 @@ server.registerTool(
   'add_rating',
   {
     title: 'Add food rating(s)',
-    description: `Add one or more food/restaurant ratings to Crate in a single write — this is exactly dataService.addBulkRating from the app. Pass one entry for a normal add. Pass more than one and their "identicals" fields are set to each other's uuids AND they're recorded in the settings file's bulkAdds list, same as what happens when you click Rerate / "add another item from this visit" in the app and submit — they'll show up together in the Bulk Adds tab. Score is 0-10 and snaps to the app's valid scale (${VALID_SCORES.join(', ')}). Provide either "category" (exact category name, must already exist) or "categoryUuid" (from list_categories) — omit both to leave uncategorized.`,
+    description: `Add food/restaurant ratings to Crate — this is exactly dataService.addBulkRating from the app, same "groups" shape. Each inner array in "groups" is one identicals group: entries within a group get their "identicals" fields set to each other's uuids (use this for the same dish rated again — Rerate). Separate groups in the same call are NOT linked to each other (use this for different dishes — "add another item from this visit"), but every entry across every group in the call is still recorded together as one Bulk Adds entry. Pass a single group with a single entry for a normal, unlinked add. Score is 0-10 and snaps to the app's valid scale (${VALID_SCORES.join(', ')}). Provide either "category" (exact category name, must already exist) or "categoryUuid" (from list_categories) — omit both to leave uncategorized.`,
     inputSchema: {
-      entries: z.array(z.object(ratingInput)).min(1).max(50),
+      groups: z.array(z.array(z.object(ratingInput)).min(1).max(50)).min(1).max(50),
     },
   },
-  async ({ entries }) => {
+  async ({ groups }) => {
     try {
       const fileIds = await getFileIds();
       const combined = await dataService.readCombined(fileIds);
 
-      const built = entries.map((e, i) => ({ i, ...buildEntryData(e, combined) }));
-      const failed = built.filter((b) => b.error);
+      const resolvedGroups = groups.map((groupEntries, gi) =>
+        groupEntries.map((e, i) => ({ gi, i, ...buildEntryData(e, combined) }))
+      );
+      const failed = resolvedGroups.flat().filter((b) => b.error);
       if (failed.length) {
         return errorResult(new Error(JSON.stringify({
           message: 'No entries were added — fix these and retry.',
-          problems: failed.map((b) => ({ index: b.i, ...b.error })),
+          problems: failed.map((b) => ({ group: b.gi, index: b.i, ...b.error })),
         })));
       }
 
-      const { builtGroups } = await dataService.addBulkRating(fileIds, fileIds.settingsFileId, [built.map((b) => b.entryData)]);
-      const added = builtGroups.flat();
-      return text({ added: added.map((e) => summarizeEntry(e, combined)) });
+      const entryGroups = resolvedGroups.map((g) => g.map((b) => b.entryData));
+      const { builtGroups } = await dataService.addBulkRating(fileIds, fileIds.settingsFileId, entryGroups);
+      return text({ added: builtGroups.map((group) => group.map((e) => summarizeEntry(e, combined))) });
     } catch (err) {
       return errorResult(err);
     }
@@ -229,7 +229,7 @@ server.registerTool(
   'update_rating',
   {
     title: 'Update a food rating',
-    description: 'Update one or more fields on an existing Crate entry, identified by uuid (get it from search_ratings). Only the fields you pass are changed. This is dataService.modifyEntry from the app — "identicals" is a plain field like any other: pass the full array of uuids you want it set to. Setting it here only changes this one entry\'s identicals value, it does not update the other side — if you want entries to agree about being identicals of each other, call update_rating on each of them.',
+    description: 'Update one or more fields on an existing Crate entry, identified by uuid (get it from search_ratings). Only the fields you pass are changed. This is dataService.modifyEntry from the app — a genuinely generic field setter. The named parameters below (restaurantName, score, category, etc.) are conveniences that resolve category names and snap scores; "identicals" is a plain field like any other, set as a raw replacement array (only changes this one entry\'s value, not the other side — call update_rating on each entry if you want them to agree). For anything not covered by the named parameters (e.g. "picture"), pass raw field/value pairs in "fields" — same as calling modifyEntry directly, no translation or validation applied.',
     inputSchema: {
       uuid: z.string().min(1),
       restaurantName: z.string().optional(),
@@ -240,21 +240,24 @@ server.registerTool(
       category: z.string().optional(),
       categoryUuid: z.string().optional(),
       identicals: z.array(z.string()).optional().describe('Full replacement list of uuids this entry is identicals with. Pass [] to clear.'),
+      dateRated: z.string().optional().describe('YYYY-MM-DD.'),
+      fields: z.record(z.string(), z.any()).optional().describe('Raw field/value pairs passed straight to dataService.modifyEntry, for anything the named parameters above don\'t cover.'),
     },
   },
-  async ({ uuid, restaurantName, specifier, location, score, notes, category, categoryUuid, identicals }) => {
+  async ({ uuid, restaurantName, specifier, location, score, notes, category, categoryUuid, identicals, dateRated, fields }) => {
     try {
       const fileIds = await getFileIds();
       const combined = await dataService.readCombined(fileIds);
       if (!combined.has(uuid)) return errorResult(new Error(`No entry with uuid ${uuid}`));
 
-      const updates = {};
+      const updates = { ...fields };
       if (restaurantName !== undefined) updates.restaurantName = restaurantName;
       if (specifier !== undefined) updates.specifier = specifier;
       if (location !== undefined) updates.location = location;
       if (score !== undefined) updates.score = String(roundToValidScore(score));
       if (notes !== undefined) updates.additionalInfo = notes;
       if (identicals !== undefined) updates.identicals = identicals;
+      if (dateRated !== undefined) updates.dateRated = new Date(dateRated + 'T00:00:00').getTime();
 
       if (categoryUuid !== undefined) {
         if (categoryUuid && !combined.has(categoryUuid)) return errorResult(new Error(`categoryUuid ${categoryUuid} does not exist.`));

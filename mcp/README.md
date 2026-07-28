@@ -51,9 +51,9 @@ Add to your MCP config (`claude mcp add`, or edit `.mcp.json` /
 ## Tools
 
 - `list_categories` — full category tree with uuids and paths.
-- `search_ratings` — filter by text, category, score range. Results include `identicals` (the entry's own field) when non-empty.
-- `add_rating` — dataService.addBulkRating as-is: pass one or more entries in a single write; passing more than one sets their `identicals` to each other's uuids AND records them in the settings file's bulkAdds list, same as Rerate / "add another item from this visit" in the app — shows up in the Bulk Adds tab.
-- `update_rating` — dataService.modifyEntry as-is: patch any field on an existing entry by uuid, including `identicals` directly (a plain field, set as a raw replacement array — no automatic two-sided bookkeeping, same as the underlying function).
+- `search_ratings` — FilterBuilder.applyFilters as-is, same filter shape as the app's Filters panel (`field`/`op`/`value`/`caseSensitive`/`useRegex`/`connector`). Results include `identicals` (the entry's own field) when non-empty.
+- `add_rating` — dataService.addBulkRating as-is, same `groups: Array<Array<entry>>` shape: entries within a group get `identicals` set to each other (same dish rated again — Rerate); separate groups aren't linked to each other (different dishes — "add another item from this visit"), but every entry across every group in the call is still recorded as one Bulk Adds entry.
+- `update_rating` — dataService.modifyEntry as-is: named parameters for the common fields (with category-name resolution and score-snapping conveniences), plus a raw `fields` passthrough for anything else (e.g. `picture`) — same generic behavior as calling modifyEntry directly.
 - `delete_rating` — delete by uuid, requires `confirm: true`.
 
 ## How it works
@@ -63,10 +63,12 @@ Reuses `crate-server`'s existing session/OAuth-token endpoints
 does — this server just replaces the browser's cookie jar with a file on
 disk. Drive reads/writes reuse the same optimistic-concurrency (`version`
 etag + retry loop) as the app, so it's safe to run alongside the web app or
-other devices without clobbering concurrent edits. `csvService.js` and
-`changelogUtils.js` are imported directly from `../src` — no forked copy to
-drift out of sync; `driveService.js` and `settingsService.js` are forked
-(Node-side auth instead of the browser's cookie jar — see their file
-headers), and `dataService.js` mirrors the app's real functions
+other devices without clobbering concurrent edits. `csvService.js`,
+`changelogUtils.js`, and `filterLogic.js` are imported directly from
+`../src` — no forked copy to drift out of sync (`filterLogic.js` was
+extracted out of `FilterBuilder.jsx` specifically so it could be imported
+by plain Node — see that file's header comment). `driveService.js` and
+`settingsService.js` are forked (Node-side auth instead of the browser's
+cookie jar), and `dataService.js` mirrors the app's real functions
 (`addBulkRating`/`modifyEntry`/`deleteEntry`) by hand for the same reason.
 Keep those two forks in sync with `src/services/` if the real ones change.
