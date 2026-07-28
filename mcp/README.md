@@ -51,10 +51,9 @@ Add to your MCP config (`claude mcp add`, or edit `.mcp.json` /
 ## Tools
 
 - `list_categories` — full category tree with uuids and paths.
-- `search_ratings` — filter by text, category, score range.
-- `add_rating` — add a single new entry (score auto-snaps to the app's valid scale).
-- `add_rating_group` — add several entries as one cross-linked group in one atomic write, same as the app's Rerate / "add another item from this visit" buttons; shows up together in the Bulk Adds tab.
-- `update_rating` — patch fields on an existing entry by uuid.
+- `search_ratings` — filter by text, category, score range. Results include `identicals` (the entry's own field) when non-empty.
+- `add_rating` — dataService.addBulkRating as-is: pass one or more entries in a single write; passing more than one sets their `identicals` to each other's uuids AND records them in the settings file's bulkAdds list, same as Rerate / "add another item from this visit" in the app — shows up in the Bulk Adds tab.
+- `update_rating` — dataService.modifyEntry as-is: patch any field on an existing entry by uuid, including `identicals` directly (a plain field, set as a raw replacement array — no automatic two-sided bookkeeping, same as the underlying function).
 - `delete_rating` — delete by uuid, requires `confirm: true`.
 
 ## How it works
@@ -66,4 +65,8 @@ disk. Drive reads/writes reuse the same optimistic-concurrency (`version`
 etag + retry loop) as the app, so it's safe to run alongside the web app or
 other devices without clobbering concurrent edits. `csvService.js` and
 `changelogUtils.js` are imported directly from `../src` — no forked copy to
-drift out of sync; only `driveService.js` (Node-side auth) is forked.
+drift out of sync; `driveService.js` and `settingsService.js` are forked
+(Node-side auth instead of the browser's cookie jar — see their file
+headers), and `dataService.js` mirrors the app's real functions
+(`addBulkRating`/`modifyEntry`/`deleteEntry`) by hand for the same reason.
+Keep those two forks in sync with `src/services/` if the real ones change.

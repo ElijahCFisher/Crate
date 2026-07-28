@@ -59,7 +59,8 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
   } = data;
 
   const {
-    bulkAdds, addBulkAdd, updateBulkAdd,
+    fileId: settingsFileId,
+    bulkAdds, addBulkAdd, updateBulkAdd, setBulkAddsLocal,
     following, addToFollowing, removeFromFollowing, promoteToFollowing,
     requestedToFollow, addToRequestedToFollow, removeFromRequestedToFollow,
     sharedWith, addToSharedWith,
@@ -192,10 +193,17 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
   }
 
   function handleSaveGroups(groups) {
-    const builtGroups = addEntryGroups(groups);
+    const builtGroups = addEntryGroups(groups, settingsFileId);
     if (builtGroups) {
       const allUuids = builtGroups.flat().map((e) => e.uuid);
-      if (allUuids.length > 1) addBulkAdd(allUuids);
+      // addEntryGroups already persists the bulkAdds entry (via
+      // dataService.addBulkRating) when settingsFileId is available — this
+      // just mirrors that into local state so the Bulk Adds tab updates
+      // immediately, same as the rest of the app's optimistic-UI pattern.
+      if (allUuids.length > 1) {
+        if (settingsFileId) setBulkAddsLocal([allUuids, ...bulkAdds]);
+        else addBulkAdd(allUuids); // settings not loaded yet — fall back to the old persist-directly path
+      }
     }
   }
 

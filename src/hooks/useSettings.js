@@ -86,6 +86,16 @@ export function useSettings(folderId) {
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /**
+   * Sync local bulkAdds state WITHOUT persisting — for when something else
+   * (dataService.addBulkRating, called directly) already wrote the settings
+   * file, and this is just reflecting that result in the UI.
+   */
+  const setBulkAddsLocal = useCallback((next) => {
+    setBulkAdds(next);
+    stateRef.current = { ...stateRef.current, bulkAdds: next };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const updateBulkAdd = useCallback((anchorUuid, newUuids) => {
     if (!newUuids || newUuids.length === 0) return;
     setBulkAdds((prev) => {
@@ -180,7 +190,8 @@ export function useSettings(folderId) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
-    bulkAdds, addBulkAdd, updateBulkAdd,
+    fileId,
+    bulkAdds, addBulkAdd, updateBulkAdd, setBulkAddsLocal,
     following, addToFollowing, removeFromFollowing, promoteToFollowing,
     requestedToFollow, addToRequestedToFollow, removeFromRequestedToFollow,
     sharedWith, addToSharedWith,

@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import * as driveService from './driveService.js';
 import * as dataService from './dataService.js';
+import * as settingsService from './settingsService.js';
 import { DRIVE_FOLDER_NAME, DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME } from './config.js';
 import { roundToValidScore, VALID_SCORES } from '../../src/utils/scaleUtils.js';
 
@@ -14,11 +15,12 @@ function getFileIds() {
   if (!fileIdsPromise) {
     fileIdsPromise = (async () => {
       const folderId = await driveService.findOrCreateFolder(DRIVE_FOLDER_NAME);
-      const [combinedFileId, changelogFileId] = await Promise.all([
+      const [combinedFileId, changelogFileId, settingsFileId] = await Promise.all([
         driveService.findOrCreateFile(folderId, DRIVE_FILE_NAME),
         driveService.findOrCreateFile(folderId, DRIVE_CHANGELOG_FILE_NAME),
+        settingsService.getOrCreateSettingsFile(folderId),
       ]);
-      return { combinedFileId, changelogFileId };
+      return { combinedFileId, changelogFileId, settingsFileId };
     })().catch((err) => { fileIdsPromise = null; throw err; });
   }
   return fileIdsPromise;
@@ -65,6 +67,7 @@ function summarizeEntry(entry, combined) {
     category: entry.ratingCategory ? categoryPath(entry.ratingCategory, combined) : undefined,
     dateRated: entry.dateRated ? new Date(entry.dateRated).toISOString().slice(0, 10) : undefined,
     notes: entry.additionalInfo || undefined,
+    identicals: entry.identicals?.length ? entry.identicals : undefined,
   };
 }
 
@@ -193,33 +196,10 @@ const ratingInput = {
 server.registerTool(
   'add_rating',
   {
-    title: 'Add a food rating',
-    description: `Add a new food/restaurant rating to Crate. Score is 0-10 and snaps to the app's valid scale (${VALID_SCORES.join(', ')}). Provide either "category" (exact category name, must already exist) or "categoryUuid" (from list_categories) — omit both to leave it uncategorized.`,
-    inputSchema: ratingInput,
-  },
-  async (args) => {
-    try {
-      const fileIds = await getFileIds();
-      const combined = await dataService.readCombined(fileIds);
-
-      const built = buildEntryData(args, combined);
-      if (built.error) return errorResult(new Error(JSON.stringify(built.error)));
-
-      const { entries } = await dataService.addEntry(fileIds, built.entryData);
-      return text({ added: summarizeEntry(entries[0], combined) });
-    } catch (err) {
-      return errorResult(err);
-    }
-  }
-);
-
-server.registerTool(
-  'add_rating_group',
-  {
-    title: 'Add a group of ratings from one visit',
-    description: `Add several ratings as one cross-linked group — the same thing the app's Rerate / "add another item from this visit" buttons do (e.g. several dishes from the same meal, or the same dish re-rated). The group is written in a single atomic Drive write and shows up together in the app's Bulk Adds tab. Same fields as add_rating, one object per entry; score snaps to the app's valid scale (${VALID_SCORES.join(', ')}).`,
+    title: 'Add food rating(s)',
+    description: `Add one or more food/restaurant ratings to Crate in a single write — this is exactly dataService.addBulkRating from the app. Pass one entry for a normal add. Pass more than one and their "identicals" fields are set to each other's uuids AND they're recorded in the settings file's bulkAdds list, same as what happens when you click Rerate / "add another item from this visit" in the app and submit — they'll show up together in the Bulk Adds tab. Score is 0-10 and snaps to the app's valid scale (${VALID_SCORES.join(', ')}). Provide either "category" (exact category name, must already exist) or "categoryUuid" (from list_categories) — omit both to leave uncategorized.`,
     inputSchema: {
-      entries: z.array(z.object(ratingInput)).min(2).max(50),
+      entries: z.array(z.object(ratingInput)).min(1).max(50),
     },
   },
   async ({ entries }) => {
@@ -236,8 +216,9 @@ server.registerTool(
         })));
       }
 
-      const { entries: added } = await dataService.addEntry(fileIds, built.map((b) => b.entryData));
-      return text({ addedCount: added.length, added: added.map((e) => summarizeEntry(e, combined)) });
+      const { builtGroups } = await dataService.addBulkRating(fileIds, fileIds.settingsFileId, [built.map((b) => b.entryData)]);
+      const added = builtGroups.flat();
+      return text({ added: added.map((e) => summarizeEntry(e, combined)) });
     } catch (err) {
       return errorResult(err);
     }
@@ -248,7 +229,7 @@ server.registerTool(
   'update_rating',
   {
     title: 'Update a food rating',
-    description: 'Update one or more fields on an existing Crate entry, identified by uuid (get it from search_ratings). Only the fields you pass are changed.',
+    description: 'Update one or more fields on an existing Crate entry, identified by uuid (get it from search_ratings). Only the fields you pass are changed. This is dataService.modifyEntry from the app — "identicals" is a plain field like any other: pass the full array of uuids you want it set to. Setting it here only changes this one entry\'s identicals value, it does not update the other side — if you want entries to agree about being identicals of each other, call update_rating on each of them.',
     inputSchema: {
       uuid: z.string().min(1),
       restaurantName: z.string().optional(),
@@ -258,9 +239,10 @@ server.registerTool(
       notes: z.string().optional(),
       category: z.string().optional(),
       categoryUuid: z.string().optional(),
+      identicals: z.array(z.string()).optional().describe('Full replacement list of uuids this entry is identicals with. Pass [] to clear.'),
     },
   },
-  async ({ uuid, restaurantName, specifier, location, score, notes, category, categoryUuid }) => {
+  async ({ uuid, restaurantName, specifier, location, score, notes, category, categoryUuid, identicals }) => {
     try {
       const fileIds = await getFileIds();
       const combined = await dataService.readCombined(fileIds);
@@ -272,6 +254,7 @@ server.registerTool(
       if (location !== undefined) updates.location = location;
       if (score !== undefined) updates.score = String(roundToValidScore(score));
       if (notes !== undefined) updates.additionalInfo = notes;
+      if (identicals !== undefined) updates.identicals = identicals;
 
       if (categoryUuid !== undefined) {
         if (categoryUuid && !combined.has(categoryUuid)) return errorResult(new Error(`categoryUuid ${categoryUuid} does not exist.`));

@@ -7,6 +7,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import * as driveService from './driveService.js';
 import * as csvService from '../../src/services/csvService.js';
+import * as settingsService from './settingsService.js';
 import {
   createAdditionChange,
   createModificationChange,
@@ -88,10 +89,10 @@ export async function readCombined(fileIds) {
 
 /**
  * Add one or more entries in a single atomic Drive write. When more than one
- * entry is passed they're cross-linked via `identicals` — the same "visit
- * group" mechanism the app's Rerate / "add another item from this visit"
- * buttons use, browsable afterward in the Bulk Adds tab. Port of the
- * original src/services/dataService.js addEntry (same signature/behavior).
+ * entry is passed their `identicals` fields are set to each other's uuids —
+ * the same thing that happens when you click Rerate / "add another item
+ * from this visit" in the app and submit, browsable afterward in the Bulk
+ * Adds tab. Unmodified port of src/services/dataService.js's addEntry.
  */
 export async function addEntry(fileIds, entryDataArray) {
   const raw = Array.isArray(entryDataArray) ? entryDataArray : [entryDataArray];
@@ -107,6 +108,42 @@ export async function addEntry(fileIds, entryDataArray) {
     for (const e of entries) data.combined.set(e.uuid, e);
     return { entries };
   });
+}
+
+/**
+ * Add multiple entry groups (each group's entries cross-linked via
+ * identicals) in one Drive write, and record the combined uuid list in the
+ * settings file's bulkAdds list — the same thing that happens when you use
+ * Rerate / "add another item from this visit" in the app and submit, making
+ * the group show up in the Bulk Adds tab. Unmodified port of
+ * src/services/dataService.js's addBulkRating.
+ */
+export async function addBulkRating(fileIds, settingsFileId, groups) {
+  const builtGroups = groups.map((groupData) => {
+    const entries = groupData.map((d) => ({ ...ENTRY_DEFAULTS, uuid: uuidv4(), dateRated: Date.now(), ...d }));
+    if (entries.length > 1) {
+      const uuids = entries.map((e) => e.uuid);
+      entries.forEach((e, i) => { e.identicals = uuids.filter((_, j) => j !== i); });
+    }
+    return entries;
+  });
+  const allEntries = builtGroups.flat();
+
+  const changes = allEntries.map((e) => createAdditionChange(e, CHANGE_METHOD));
+  await applyChanges(fileIds, changes, (data) => {
+    for (const e of allEntries) data.combined.set(e.uuid, e);
+    return {};
+  });
+
+  let bulkAdds = null;
+  const allUuids = allEntries.map((e) => e.uuid);
+  if (allUuids.length > 1) {
+    const settings = await settingsService.readSettings(settingsFileId);
+    bulkAdds = [allUuids, ...(settings.bulkAdds || [])];
+    await settingsService.writeSettings(settingsFileId, { ...settings, bulkAdds });
+  }
+
+  return { builtGroups, bulkAdds };
 }
 
 export async function modifyEntry(fileIds, entryUuid, updates) {

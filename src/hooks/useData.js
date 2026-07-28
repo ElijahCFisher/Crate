@@ -520,9 +520,13 @@ export function useData(isAuthenticated) {
   /**
    * Add multiple entry groups in a single Drive write. Each group's entries are
    * cross-linked as identicals; entries across groups are not linked.
+   * `settingsFileId`, if provided, also records the combined uuid list in the
+   * settings file's bulkAdds list (dataService.addBulkRating) so the group
+   * shows up in the Bulk Adds tab — same thing Rerate / "add another item
+   * from this visit" do today via AppLayout's separate addBulkAdd call.
    * Returns the built groups (Array<Entry[]>) so callers can collect UUIDs.
    */
-  const addEntryGroups = useCallback((groups) => {
+  const addEntryGroups = useCallback((groups, settingsFileId) => {
     const currentCombined = combinedRef.current;
 
     const builtGroups = groups.map((groupData) => {
@@ -564,7 +568,12 @@ export function useData(isAuthenticated) {
     setChangelog((prev) => [...prev, ...changes]);
 
     withSyncBackground(
-      (fids) => dataService.addEntries(fids, allEntries),
+      (fids) => settingsFileId
+        ? dataService.addBulkRating(fids, settingsFileId, builtGroups)
+        : dataService.addEntries(fids, allEntries),
+      // Offline/retry replay only knows about entries (settingsFileId isn't
+      // available inside flushQueue) — same best-effort limitation bulkAdds
+      // persistence already has today via useSettings' addBulkAdd.
       { type: 'addEntries', entries: allEntries },
       newCombined,
       newChangelog,

@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import * as driveService from './driveService';
 import * as csvService from './csvService';
+import * as settingsService from './settingsService';
 import {
   createAdditionChange,
   createModificationChange,
@@ -237,6 +238,46 @@ export async function addEntries(fileIds, entries) {
     for (const e of normalized) data.combined.set(e.uuid, e);
     return {};
   });
+}
+
+/**
+ * Add multiple entry groups (each group's entries cross-linked via identicals,
+ * same as addEntry does for an array) in one Drive write, and record the
+ * combined uuid list in the settings file's bulkAdds list — the same thing
+ * that happens when you use Rerate / "add another item from this visit" in
+ * the app and submit, making the group show up in the Bulk Adds tab.
+ *
+ * `groups`: Array<Array<partial entry data>> — same convention as addEntry,
+ * uuid/dateRated are defaulted here if the caller didn't already set them.
+ * Returns { builtGroups, bulkAdds } — bulkAdds is null when nothing new was
+ * recorded (a single 1-entry total doesn't count as a bulk add).
+ */
+export async function addBulkRating(fileIds, settingsFileId, groups) {
+  const builtGroups = groups.map((groupData) => {
+    const entries = groupData.map((d) => ({ ...ENTRY_DEFAULTS, uuid: uuidv4(), dateRated: Date.now(), ...d }));
+    if (entries.length > 1) {
+      const uuids = entries.map((e) => e.uuid);
+      entries.forEach((e, i) => { e.identicals = uuids.filter((_, j) => j !== i); });
+    }
+    return entries;
+  });
+  const allEntries = builtGroups.flat();
+
+  const changes = allEntries.map((e) => createAdditionChange(e));
+  await applyChanges(fileIds, changes, (data) => {
+    for (const e of allEntries) data.combined.set(e.uuid, e);
+    return {};
+  });
+
+  let bulkAdds = null;
+  const allUuids = allEntries.map((e) => e.uuid);
+  if (allUuids.length > 1) {
+    const settings = await settingsService.readSettings(settingsFileId);
+    bulkAdds = [allUuids, ...(settings.bulkAdds || [])];
+    await settingsService.writeSettings(settingsFileId, { ...settings, bulkAdds });
+  }
+
+  return { builtGroups, bulkAdds };
 }
 
 /**

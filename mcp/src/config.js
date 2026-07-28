@@ -37,6 +37,7 @@ export const LOGIN_ORIGIN = `http://localhost:${LOGIN_PORT}`;
 export const DRIVE_FOLDER_NAME = 'Food Ratings';
 export const DRIVE_FILE_NAME = 'food-ratings-data.csv';
 export const DRIVE_CHANGELOG_FILE_NAME = 'food-ratings-changelog.csv';
+export const SETTINGS_FILE_NAME = 'SettingsEtc.json';
 
 export const SESSION_FILE = path.join(os.homedir(), '.crate-mcp', 'session.json');
 
