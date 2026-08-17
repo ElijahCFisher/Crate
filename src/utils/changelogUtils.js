@@ -20,6 +20,7 @@ export function createAdditionChange(entry, changeMethod = DEFAULT_METHOD) {
     additionalInfo: entry.additionalInfo ?? '',
     picture: entry.picture ?? '',
     entryType: entry.entryType ?? 'food',
+    linkedFields: entry.linkedFields ?? {},
     changeMethod,
     dateOfChange: Date.now(),
   };
@@ -43,6 +44,7 @@ export function createModificationChange(entryUuid, fieldName, value, changeMeth
     additionalInfo: '',
     picture: '',
     entryType: '',
+    linkedFields: {},
     changeMethod,
     dateOfChange: Date.now(),
   };
@@ -66,6 +68,7 @@ export function createDeletionChange(entryUuid, changeMethod = DEFAULT_METHOD) {
     additionalInfo: '',
     picture: '',
     entryType: '',
+    linkedFields: {},
     changeMethod,
     dateOfChange: Date.now(),
   };

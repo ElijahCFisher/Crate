@@ -6,14 +6,14 @@ const CHANGELOG_MARKER = 'SECTION,CHANGELOG';
 const COMBINED_FIELDS = [
   'UUID', 'Entry Type', 'Identicals', 'Categories', 'Rating Category',
   'Restaurant Name', 'Specifier', 'Location', 'Score', 'Date Rated',
-  'Additional Information', 'Picture',
+  'Additional Information', 'Picture', 'Linked Fields',
 ];
 
 const CHANGELOG_FIELDS = [
   'Entry UUID', 'Change UUID', 'Change Type', 'Field Name', 'Value',
   'Identicals', 'Categories', 'Rating Category', 'Restaurant Name',
   'Specifier', 'Location', 'Score', 'Date Rated', 'Additional Information',
-  'Picture', 'Entry Type', 'Change Method', 'Date of Change',
+  'Picture', 'Entry Type', 'Change Method', 'Date of Change', 'Linked Fields',
 ];
 
 // ── Split-file parse / generate (two separate Drive files) ───────────────────
@@ -114,6 +114,38 @@ function serializeList(arr) {
   return (arr || []).join('|');
 }
 
+/**
+ * `linkedFields` records, on a *leader* entry, which of its fields are still
+ * mirrored onto which follower entries — the "keep this uncertain restaurant
+ * name changeable across all of them" link. Stored as one CSV cell:
+ *
+ *   restaurantName:uuid1;uuid2|location:uuid3
+ *
+ * Field *names* (not column indices) are the keys, so reordering
+ * COMBINED_FIELDS can never silently repoint a link at the wrong field.
+ */
+export function parseLinkedFields(str) {
+  const map = {};
+  if (!str || typeof str !== 'string' || str.trim() === '') return map;
+  for (const group of str.split('|')) {
+    const sep = group.indexOf(':');
+    if (sep <= 0) continue;
+    const field = group.slice(0, sep).trim();
+    const uuids = group.slice(sep + 1).split(';').map((u) => u.trim()).filter(Boolean);
+    if (field && uuids.length > 0) map[field] = [...new Set([...(map[field] || []), ...uuids])];
+  }
+  return map;
+}
+
+export function serializeLinkedFields(map) {
+  if (!map) return '';
+  if (typeof map === 'string') return map;
+  return Object.entries(map)
+    .filter(([field, uuids]) => field && Array.isArray(uuids) && uuids.length > 0)
+    .map(([field, uuids]) => `${field}:${uuids.join(';')}`)
+    .join('|');
+}
+
 function parseNum(val, parser) {
   if (val === '' || val == null) return null;
   const n = parser(val);
@@ -134,6 +166,7 @@ function rowToEntry(row) {
     dateRated: parseNum(row['Date Rated'], parseInt),
     additionalInfo: row['Additional Information'] || '',
     picture: row['Picture'] || '',
+    linkedFields: parseLinkedFields(row['Linked Fields']),
   };
 }
 
@@ -151,6 +184,7 @@ function entryToRow(entry) {
     'Date Rated': entry.dateRated != null ? entry.dateRated : '',
     'Additional Information': entry.additionalInfo || '',
     'Picture': entry.picture || '',
+    'Linked Fields': serializeLinkedFields(entry.linkedFields),
   };
 }
 
@@ -174,6 +208,7 @@ function rowToChange(row) {
     entryType: row['Entry Type'] || '',
     changeMethod: row['Change Method'] || '',
     dateOfChange: parseNum(row['Date of Change'], parseInt),
+    linkedFields: parseLinkedFields(row['Linked Fields']),
   };
 }
 
@@ -197,5 +232,6 @@ function changeToRow(change) {
     'Entry Type': change.entryType || '',
     'Change Method': change.changeMethod || '',
     'Date of Change': change.dateOfChange != null ? change.dateOfChange : '',
+    'Linked Fields': serializeLinkedFields(change.linkedFields),
   };
 }

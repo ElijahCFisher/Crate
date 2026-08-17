@@ -16,8 +16,13 @@ import FollowRequestDialog from '../Friends/FollowRequestDialog';
 import SettingsPage from '../Settings/SettingsPage';
 import FindReplaceDialog from '../Entries/FindReplaceDialog';
 import NotesPanel from '../Notes/NotesPanel';
+import Snackbar from '@mui/material/Snackbar';
+import Button from '@mui/material/Button';
 import { useSettings } from '../../hooks/useSettings';
 import { shareFile } from '../../services/driveService';
+import {
+  LINKABLE_FIELDS, makeLinkKeyResolver, resolveLinkPlan, collectLinkedFollowers,
+} from '../../utils/linkUtils';
 
 function decodeFollowRequest(encoded) {
   try {
@@ -78,6 +83,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
   const [deleteDialogEntry, setDeleteDialogEntry] = useState(null);
   const [exportImportOpen, setExportImportOpen] = useState(false);
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
+  const [linkedEdit, setLinkedEdit] = useState(null);
 
   // Follow request from URL
   const [followRequester, setFollowRequester] = useState(null);
@@ -158,12 +164,59 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     setBulkAddEntries(null);
   }
 
-  function handleSave(payload, newGroupData = []) {
+  /** Write the `linkedFields` maps a just-saved modal asked for. */
+  function applyLinkPlan(linkPlan, createdByGroup) {
+    if (!linkPlan) return;
+    const resolveKey = makeLinkKeyResolver(createdByGroup);
+    for (const { uuid, linkedFields } of resolveLinkPlan(linkPlan, resolveKey, combined)) {
+      modifyEntry(uuid, { linkedFields });
+    }
+  }
+
+  /**
+   * Editing an entry on its own still moves its linked followers — that's the
+   * whole point of the link — but it's easy to do by accident from the table,
+   * so it's announced with an undo rather than done silently.
+   */
+  function propagateToLinked(leaderEntry, payload) {
+    const fields = Object.keys(payload).filter((f) => LINKABLE_FIELDS.includes(f));
+    if (fields.length === 0) return;
+
+    const touched = new Map();
+    for (const field of fields) {
+      for (const uuid of collectLinkedFollowers(combined, leaderEntry.uuid, field)) {
+        const follower = combined.get(uuid);
+        if (!follower || follower[field] === payload[field]) continue;
+        if (!touched.has(uuid)) touched.set(uuid, { updates: {}, previous: {} });
+        const t = touched.get(uuid);
+        t.updates[field] = payload[field];
+        t.previous[field] = follower[field];
+      }
+    }
+    if (touched.size === 0) return;
+
+    for (const [uuid, { updates }] of touched) modifyEntry(uuid, updates);
+    setLinkedEdit({
+      count: touched.size,
+      previous: Array.from(touched, ([uuid, { previous }]) => [uuid, previous]),
+    });
+  }
+
+  function undoLinkedEdit() {
+    if (!linkedEdit) return;
+    for (const [uuid, previous] of linkedEdit.previous) modifyEntry(uuid, previous);
+    setLinkedEdit(null);
+  }
+
+  function handleSave(payload, newGroupData = [], linkPlan = null) {
     if (editingEntry) {
       if (Object.keys(payload).length > 0) modifyEntry(editingEntry.uuid, payload);
+      const createdByGroup = [];
       for (const { entries, existingUuids } of newGroupData) {
-        if (entries.length > 0) addEntriesWithLinks(entries, existingUuids);
+        createdByGroup.push(entries.length > 0 ? addEntriesWithLinks(entries, existingUuids) : []);
       }
+      propagateToLinked(editingEntry, payload);
+      applyLinkPlan(linkPlan, createdByGroup);
       if ('identicals' in payload) {
         const nextIdenticals = payload.identicals || [];
         const nextSet = new Set(nextIdenticals);
@@ -192,8 +245,9 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     }
   }
 
-  function handleSaveGroups(groups) {
+  function handleSaveGroups(groups, linkPlan = null) {
     const builtGroups = addEntryGroups(groups, settingsFileId);
+    applyLinkPlan(linkPlan, builtGroups || []);
     if (builtGroups) {
       const allUuids = builtGroups.flat().map((e) => e.uuid);
       // addEntryGroups already persists the bulkAdds entry (via
@@ -207,16 +261,19 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
     }
   }
 
-  function handleBulkSave(changes, newGroupData = []) {
+  function handleBulkSave(changes, newGroupData = [], linkPlan = null) {
     for (const { uuid, updates } of changes) {
       modifyEntry(uuid, updates);
     }
     const allNewUuids = [];
+    const createdByGroup = [];
     for (const { entries, existingUuids } of newGroupData) {
-      if (entries.length === 0) continue;
+      if (entries.length === 0) { createdByGroup.push([]); continue; }
       const newEntries = addEntriesWithLinks(entries, existingUuids);
+      createdByGroup.push(newEntries);
       allNewUuids.push(...newEntries.map((e) => e.uuid));
     }
+    applyLinkPlan(linkPlan, createdByGroup);
     if (allNewUuids.length > 0 && bulkAddEntries?.length > 0) {
       updateBulkAdd(bulkAddEntries[0].uuid, allNewUuids);
     }
@@ -410,6 +467,22 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         onClose={() => setFindReplaceOpen(false)}
         foodEntries={foodEntries}
         onReplaceAll={handleReplaceAll}
+      />
+
+      {/* Linked-field propagation notice */}
+      <Snackbar
+        open={!!linkedEdit}
+        autoHideDuration={8000}
+        onClose={() => setLinkedEdit(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        message={linkedEdit
+          ? `Also updated ${linkedEdit.count} linked ${linkedEdit.count === 1 ? 'entry' : 'entries'}`
+          : ''}
+        action={
+          <Button color="secondary" size="small" onClick={undoLinkedEdit}>
+            Undo
+          </Button>
+        }
       />
 
       {/* Follow request from link */}

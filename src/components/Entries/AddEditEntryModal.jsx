@@ -22,12 +22,15 @@ import EditIcon from '@mui/icons-material/Edit';
 import ReplayIcon from '@mui/icons-material/Replay';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import ClearIcon from '@mui/icons-material/Clear';
+import LinkIcon from '@mui/icons-material/Link';
+import LinkOffIcon from '@mui/icons-material/LinkOff';
 import { CategorySelect } from '../Categories/CategorySelector';
 import { uploadPhoto, findFileInFolder } from '../../services/driveService';
 import DriveImage from '../DriveImage';
 import ImageLightbox from '../ImageLightbox';
 import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
 import { evalAdditionalInfo, hasExpressions } from '../../utils/mathUtils';
+import { LINKABLE_FIELDS } from '../../utils/linkUtils';
 import {
   LABEL_RESTAURANT, LABEL_FOOD_NAME, LABEL_RATING, LABEL_CATEGORY,
   LABEL_LOCATION, LABEL_DATE, LABEL_ADDITIONAL_INFO, LABEL_PICTURE,
@@ -157,6 +160,91 @@ function computeDiff(original, formShared, primaryRating) {
   return updates;
 }
 
+// ── Field linking ────────────────────────────────────────────────────────────
+//
+// A rating created from another one starts out mirroring every field; typing
+// into the follower's own input drops that one field from the link, and the
+// leader's grey button drops it for every follower at once.
+
+/** The primary rating's values are split across the form root and primaryRating. */
+function applyPatchToPrimary(form, patch) {
+  const next = { ...form };
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === 'score' || key === 'ratingCategory' || key === 'newCategoryName') {
+      next.primaryRating = { ...next.primaryRating, [key]: value };
+    } else {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
+/**
+ * Write `patch` onto the rating identified by `sourceId`, then push it down the
+ * link chain. A user edit on a follower severs that field from its own leader
+ * first — but the follower keeps feeding its own followers.
+ */
+export function applyLinkedChange(form, sourceId, field, patch, { userEdit = true } = {}) {
+  let next = { ...form, additionalRatings: [...form.additionalRatings] };
+
+  if (userEdit && sourceId !== 'primary') {
+    const i = next.additionalRatings.findIndex((r) => r.id === sourceId);
+    if (i >= 0 && (next.additionalRatings[i].linkedFields || []).includes(field)) {
+      next.additionalRatings[i] = {
+        ...next.additionalRatings[i],
+        linkedFields: next.additionalRatings[i].linkedFields.filter((f) => f !== field),
+      };
+    }
+  }
+
+  if (sourceId === 'primary') {
+    next = applyPatchToPrimary(next, patch);
+  } else {
+    const i = next.additionalRatings.findIndex((r) => r.id === sourceId);
+    if (i >= 0) next.additionalRatings[i] = { ...next.additionalRatings[i], ...patch };
+  }
+
+  const queue = [sourceId];
+  const seen = new Set(queue);
+  while (queue.length > 0) {
+    const parentId = queue.shift();
+    next.additionalRatings.forEach((r, i) => {
+      if (r.linkParentId !== parentId || seen.has(r.id)) return;
+      if (!(r.linkedFields || []).includes(field)) return;
+      next.additionalRatings[i] = { ...r, ...patch };
+      seen.add(r.id);
+      queue.push(r.id);
+    });
+  }
+
+  return next;
+}
+
+function hasLinkedChildren(form, ownerId, field) {
+  return form.additionalRatings.some(
+    (r) => r.linkParentId === ownerId && (r.linkedFields || []).includes(field)
+  );
+}
+
+/**
+ * Flatten the form's parent/child links into `{ parent, child, field }` triples
+ * keyed by whatever `keyByRatingId` maps each rating to — a `uuid:…` key for
+ * entries that already exist, a `new:group:index` position for ones this save
+ * is about to create (their UUIDs don't exist until the write happens).
+ */
+export function buildLinkPlan(form, keyByRatingId) {
+  const links = [];
+  for (const r of form.additionalRatings) {
+    if (!r.linkParentId || !(r.linkedFields || []).length) continue;
+    const child = keyByRatingId.get(r.id);
+    const parent = keyByRatingId.get(r.linkParentId);
+    if (!child || !parent || child === parent) continue;
+    for (const field of r.linkedFields) links.push({ parent, child, field });
+  }
+  // `keys` scopes the write: only ratings that were on screen get re-decided.
+  return { links, keys: Array.from(keyByRatingId.values()) };
+}
+
 // ── Additional-rating field helpers ──────────────────────────────────────────
 
 function getPrimarySource(form) {
@@ -174,12 +262,14 @@ function getPrimarySource(form) {
   };
 }
 
-function makeAdditionalRating(source) {
+function makeAdditionalRating(source, linkParentId = null) {
   const id = Date.now() + Math.random();
   return {
     id,
     groupId: String(id),
     isIdentical: false,
+    linkParentId,
+    linkedFields: linkParentId ? [...LINKABLE_FIELDS] : [],
     ratingCategory: source.ratingCategory ?? '',
     newCategoryName: source.newCategoryName ?? null,
     score: source.score ?? '',
@@ -193,11 +283,13 @@ function makeAdditionalRating(source) {
   };
 }
 
-function makeIdenticalRating(source, groupId) {
+function makeIdenticalRating(source, groupId, linkParentId = null) {
   return {
     id: Date.now() + Math.random(),
     groupId,
     isIdentical: true,
+    linkParentId,
+    linkedFields: linkParentId ? [...LINKABLE_FIELDS] : [],
     ratingCategory: source.ratingCategory ?? '',
     newCategoryName: source.newCategoryName ?? null,
     score: source.score ?? '',
@@ -262,6 +354,8 @@ function entriesToForm(entries) {
       id: Date.now() + Math.random(),
       groupId,
       isIdentical,
+      linkParentId: null,
+      linkedFields: [],
       originalUuid: e.uuid,
       ratingCategory: e.ratingCategory || '',
       newCategoryName: null,
@@ -289,7 +383,35 @@ function entriesToForm(entries) {
     }
   }
 
-  return { ...shared, primaryRating, primaryOriginalUuid: primaryEntry.uuid, additionalRatings };
+  // Restore field links from the leaders' stored maps. They're persisted
+  // leader → followers; the form needs the inverse, follower → leader + fields.
+  const idByUuid = new Map([[primaryEntry.uuid, 'primary']]);
+  for (const r of additionalRatings) idByUuid.set(r.originalUuid, r.id);
+
+  const inbound = new Map(); // follower form id → { linkParentId, linkedFields }
+  for (const e of entries) {
+    const leaderId = idByUuid.get(e.uuid);
+    if (leaderId === undefined) continue;
+    for (const [field, followerUuids] of Object.entries(e.linkedFields || {})) {
+      if (!LINKABLE_FIELDS.includes(field)) continue;
+      for (const followerUuid of followerUuids) {
+        const followerId = idByUuid.get(followerUuid);
+        if (followerId === undefined || followerId === leaderId) continue;
+        const existing = inbound.get(followerId);
+        // An entry can only follow one leader; first one named wins.
+        if (existing && existing.linkParentId !== leaderId) continue;
+        if (existing) existing.linkedFields.push(field);
+        else inbound.set(followerId, { linkParentId: leaderId, linkedFields: [field] });
+      }
+    }
+  }
+
+  const linked = additionalRatings.map((r) => {
+    const link = inbound.get(r.id);
+    return link ? { ...r, linkParentId: link.linkParentId, linkedFields: link.linkedFields } : r;
+  });
+
+  return { ...shared, primaryRating, primaryOriginalUuid: primaryEntry.uuid, additionalRatings: linked };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -332,6 +454,7 @@ export default function AddEditEntryModal({
   const [filenameLookup, setFilenameLookup] = useState('');
   const [filenameLookupStatus, setFilenameLookupStatus] = useState(null); // 'found' | 'not_found' | 'searching'
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lastUnlink, setLastUnlink] = useState(null);
   const photoInputRef = useRef(null);
   const photoGalleryRef = useRef(null);
   const highlightedSuggestionsRef = useRef({});
@@ -340,6 +463,7 @@ export default function AddEditEntryModal({
     if (open) {
       setShowAdvanced(showAdvancedByDefault);
       setShowIdenticalsEditor(false);
+      setLastUnlink(null);
       setFormKey((k) => k + 1);
       if (!entry && initialEntries && initialEntries.length > 0) {
         setForm(entriesToForm(initialEntries));
@@ -350,19 +474,110 @@ export default function AddEditEntryModal({
   }, [open, entry, initialEntries, showAdvancedByDefault]);
 
   function setShared(field, value) {
-    setForm((f) => ({ ...f, [field]: value }));
+    setForm((f) => applyLinkedChange(f, 'primary', field, { [field]: value }));
   }
 
   function setPrimary(field, value) {
-    setForm((f) => ({ ...f, primaryRating: { ...f.primaryRating, [field]: value } }));
+    setForm((f) => applyLinkedChange(f, 'primary', field, { [field]: value }));
   }
 
   function setAdditional(idx, field, value) {
     setForm((f) => {
-      const next = [...f.additionalRatings];
-      next[idx] = { ...next[idx], [field]: value };
-      return { ...f, additionalRatings: next };
+      const target = f.additionalRatings[idx];
+      if (!target) return f;
+      return applyLinkedChange(f, target.id, field, { [field]: value });
     });
+  }
+
+  function setDate(ownerId, value) {
+    setForm((f) => applyLinkedChange(f, ownerId, 'dateRated', {
+      dateRated: value,
+      dateRatedMs: dateInputToMs(value),
+    }));
+  }
+
+  // ── Link toggling ───────────────────────────────────────────────────────────
+
+  function unlinkField(ownerId, field) {
+    const childIds = form.additionalRatings
+      .filter((r) => r.linkParentId === ownerId && (r.linkedFields || []).includes(field))
+      .map((r) => r.id);
+    if (childIds.length === 0) return;
+    setForm((f) => ({
+      ...f,
+      additionalRatings: f.additionalRatings.map((r) =>
+        childIds.includes(r.id)
+          ? { ...r, linkedFields: r.linkedFields.filter((x) => x !== field) }
+          : r
+      ),
+    }));
+    setLastUnlink({ ownerId, field, childIds });
+  }
+
+  function undoUnlink() {
+    if (!lastUnlink) return;
+    const { field, childIds } = lastUnlink;
+    setForm((f) => ({
+      ...f,
+      additionalRatings: f.additionalRatings.map((r) =>
+        childIds.includes(r.id) && !(r.linkedFields || []).includes(field)
+          ? { ...r, linkedFields: [...(r.linkedFields || []), field] }
+          : r
+      ),
+    }));
+    setLastUnlink(null);
+  }
+
+  /**
+   * The subtle grey button that lives inside a leader's input: unlinks that one
+   * field from every rating following it. Sticks around as an undo right after
+   * a click, then disappears once you unlink something else or close.
+   */
+  function linkAdornment(ownerId, field) {
+    const linked = hasLinkedChildren(form, ownerId, field);
+    const undoable = !linked && lastUnlink?.ownerId === ownerId && lastUnlink?.field === field;
+    if (!linked && !undoable) return null;
+    const count = form.additionalRatings.filter(
+      (r) => r.linkParentId === ownerId && (r.linkedFields || []).includes(field)
+    ).length;
+    return (
+      <Tooltip title={linked
+        ? `Also changes ${count} linked rating${count === 1 ? '' : 's'} — click to unlink`
+        : 'Undo unlink'}>
+        <IconButton
+          size="small"
+          tabIndex={-1}
+          onClick={() => (linked ? unlinkField(ownerId, field) : undoUnlink())}
+          sx={{ color: 'text.disabled', p: 0.25, '&:hover': { color: 'text.secondary' } }}
+        >
+          {linked ? <LinkIcon sx={{ fontSize: '1rem' }} /> : <LinkOffIcon sx={{ fontSize: '1rem' }} />}
+        </IconButton>
+      </Tooltip>
+    );
+  }
+
+  /** InputProps carrying the link button, or undefined when there's nothing to show. */
+  function linkInputProps(ownerId, field, adornmentSx) {
+    const button = linkAdornment(ownerId, field);
+    if (!button) return undefined;
+    return {
+      endAdornment: <InputAdornment position="end" sx={adornmentSx}>{button}</InputAdornment>,
+    };
+  }
+
+  /** Append the link button to an Autocomplete's existing end adornment. */
+  function withLinkAdornment(params, ownerId, field) {
+    const button = linkAdornment(ownerId, field);
+    if (!button) return params.InputProps;
+    return {
+      ...params.InputProps,
+      endAdornment: (
+        <>
+          {button}
+          {params.InputProps?.endAdornment}
+        </>
+      ),
+    };
   }
 
   function suggestionCommitProps(field, onChange) {
@@ -414,74 +629,75 @@ export default function AddEditEntryModal({
   function addAdditionalRating() {
     setForm((f) => ({
       ...f,
-      additionalRatings: [...f.additionalRatings, makeAdditionalRating(getPrimarySource(f))],
+      additionalRatings: [...f.additionalRatings, makeAdditionalRating(getPrimarySource(f), 'primary')],
     }));
   }
 
   function addIdenticalRating() {
     setForm((f) => ({
       ...f,
-      additionalRatings: [...f.additionalRatings, makeIdenticalRating(getPrimarySource(f), 'primary')],
+      additionalRatings: [
+        ...f.additionalRatings,
+        makeIdenticalRating(getPrimarySource(f), 'primary', 'primary'),
+      ],
     }));
   }
 
   function addAdditionalFromEntry(idx) {
-    setForm((f) => ({
-      ...f,
-      additionalRatings: [...f.additionalRatings, makeAdditionalRating(f.additionalRatings[idx])],
-    }));
+    setForm((f) => {
+      const src = f.additionalRatings[idx];
+      if (!src) return f;
+      return { ...f, additionalRatings: [...f.additionalRatings, makeAdditionalRating(src, src.id)] };
+    });
   }
 
   function addIdenticalOfEntry(idx) {
     setForm((f) => {
       const src = f.additionalRatings[idx];
+      if (!src) return f;
       return {
         ...f,
-        additionalRatings: [...f.additionalRatings, makeIdenticalRating(src, src.groupId)],
+        additionalRatings: [...f.additionalRatings, makeIdenticalRating(src, src.groupId, src.id)],
       };
     });
   }
 
   function removeAdditionalRating(idx) {
     setForm((f) => {
+      const removed = f.additionalRatings[idx];
       const next = [...f.additionalRatings];
       next.splice(idx, 1);
-      return { ...f, additionalRatings: next };
+      // Anything that was following the removed rating is on its own now.
+      return {
+        ...f,
+        additionalRatings: next.map((r) =>
+          removed && r.linkParentId === removed.id
+            ? { ...r, linkParentId: null, linkedFields: [] }
+            : r
+        ),
+      };
     });
   }
 
   // ── Category selection ──────────────────────────────────────────────────────
 
-  function applyCategory(target, uuid) {
-    if (target === 'primary') {
-      setForm((f) => ({
-        ...f,
-        primaryRating: { ...f.primaryRating, ratingCategory: uuid, newCategoryName: null },
-      }));
-    } else {
+  /** Category and its pending new-category name always move together. */
+  function setCategory(target, patch) {
+    setForm((f) => {
+      if (target === 'primary') return applyLinkedChange(f, 'primary', 'ratingCategory', patch);
       const idx = parseInt(target.replace('additional-', ''), 10);
-      setForm((f) => {
-        const next = [...f.additionalRatings];
-        next[idx] = { ...next[idx], ratingCategory: uuid, newCategoryName: null };
-        return { ...f, additionalRatings: next };
-      });
-    }
+      const rating = f.additionalRatings[idx];
+      if (!rating) return f;
+      return applyLinkedChange(f, rating.id, 'ratingCategory', patch);
+    });
+  }
+
+  function applyCategory(target, uuid) {
+    setCategory(target, { ratingCategory: uuid, newCategoryName: null });
   }
 
   function applyNewCategoryName(target, name) {
-    if (target === 'primary') {
-      setForm((f) => ({
-        ...f,
-        primaryRating: { ...f.primaryRating, ratingCategory: '', newCategoryName: name || null },
-      }));
-    } else {
-      const idx = parseInt(target.replace('additional-', ''), 10);
-      setForm((f) => {
-        const next = [...f.additionalRatings];
-        next[idx] = { ...next[idx], ratingCategory: '', newCategoryName: name || null };
-        return { ...f, additionalRatings: next };
-      });
-    }
+    setCategory(target, { ratingCategory: '', newCategoryName: name || null });
   }
 
   function makeRatingCategoryChangeHandler(target) {
@@ -539,11 +755,25 @@ export default function AddEditEntryModal({
         otherNewByGroup.get(r.groupId).push(r);
       }
       const newGroupData = [];
-      if (primaryNew.length > 0) newGroupData.push({ entries: primaryNew.map(toNewEntry), existingUuids: [entry.uuid] });
-      for (const [, g] of otherNewByGroup) newGroupData.push({ entries: g.map(toNewEntry), existingUuids: [] });
+      const newGroupRatings = [];
+      if (primaryNew.length > 0) {
+        newGroupData.push({ entries: primaryNew.map(toNewEntry), existingUuids: [entry.uuid] });
+        newGroupRatings.push(primaryNew);
+      }
+      for (const [, g] of otherNewByGroup) {
+        newGroupData.push({ entries: g.map(toNewEntry), existingUuids: [] });
+        newGroupRatings.push(g);
+      }
+
+      // Existing followers of this entry aren't in the form, so links can only
+      // appear here alongside newly created ratings.
+      const keyByRatingId = new Map([['primary', `uuid:${entry.uuid}`]]);
+      newGroupRatings.forEach((members, gi) =>
+        members.forEach((r, ei) => keyByRatingId.set(r.id, `new:${gi}:${ei}`)));
+      const linkPlan = buildLinkPlan(form, keyByRatingId);
 
       if (Object.keys(updates).length === 0 && newGroupData.length === 0) { onClose(); return; }
-      onSave(updates, newGroupData);
+      onSave(updates, newGroupData, linkPlan);
     } else if (isBulkEdit) {
       const byUuid = new Map((initialEntries || []).map((orig) => [orig.uuid, orig]));
       const changes = [];
@@ -584,6 +814,7 @@ export default function AddEditEntryModal({
       }
 
       const newGroupData = [];
+      const newGroupRatings = [];
 
       const primaryNew = form.additionalRatings.filter((r) => r.groupId === 'primary' && !r.originalUuid);
       if (primaryNew.length > 0) {
@@ -591,21 +822,41 @@ export default function AddEditEntryModal({
           entries: primaryNew.map(toNewEntry),
           existingUuids: form.primaryOriginalUuid ? [form.primaryOriginalUuid] : [],
         });
+        newGroupRatings.push(primaryNew);
       }
 
       const otherNewByGroup = new Map();
       for (const r of form.additionalRatings) {
         if (r.groupId === 'primary') continue;
-        if (!otherNewByGroup.has(r.groupId)) otherNewByGroup.set(r.groupId, { entries: [], existingUuids: [] });
+        if (!otherNewByGroup.has(r.groupId)) {
+          otherNewByGroup.set(r.groupId, { entries: [], existingUuids: [], ratings: [] });
+        }
         const g = otherNewByGroup.get(r.groupId);
-        if (r.originalUuid) g.existingUuids.push(r.originalUuid);
-        else g.entries.push(toNewEntry(r));
+        if (r.originalUuid) {
+          g.existingUuids.push(r.originalUuid);
+        } else {
+          g.entries.push(toNewEntry(r));
+          g.ratings.push(r);
+        }
       }
       for (const [, g] of otherNewByGroup) {
-        if (g.entries.length > 0) newGroupData.push(g);
+        if (g.entries.length === 0) continue;
+        newGroupData.push({ entries: g.entries, existingUuids: g.existingUuids });
+        newGroupRatings.push(g.ratings);
       }
 
-      if (changes.length > 0 || newGroupData.length > 0) onBulkSave(changes, newGroupData);
+      const keyByRatingId = new Map();
+      if (form.primaryOriginalUuid) keyByRatingId.set('primary', `uuid:${form.primaryOriginalUuid}`);
+      for (const r of form.additionalRatings) {
+        if (r.originalUuid) keyByRatingId.set(r.id, `uuid:${r.originalUuid}`);
+      }
+      newGroupRatings.forEach((members, gi) =>
+        members.forEach((r, ei) => keyByRatingId.set(r.id, `new:${gi}:${ei}`)));
+      const linkPlan = buildLinkPlan(form, keyByRatingId);
+
+      // Always call: unlinking two existing entries produces no field diff and
+      // no new entries, but still has to be written.
+      onBulkSave(changes, newGroupData, linkPlan);
     } else {
       function toEntry(r, scoreField, resolvedCategoryUuid) {
         return {
@@ -623,8 +874,8 @@ export default function AddEditEntryModal({
       const primaryCatUuid = resolveCategory(form.primaryRating.newCategoryName, form.primaryRating.ratingCategory);
       const primaryEntry = toEntry(form, form.primaryRating.score, primaryCatUuid);
 
-      const primaryGroupExtras = form.additionalRatings
-        .filter((r) => r.groupId === 'primary')
+      const primaryGroupRatings = form.additionalRatings.filter((r) => r.groupId === 'primary');
+      const primaryGroupExtras = primaryGroupRatings
         .map((r) => toEntry(r, r.score, resolveCategory(r.newCategoryName, r.ratingCategory)));
 
       const otherAdditionals = form.additionalRatings.filter((r) => r.groupId !== 'primary');
@@ -633,12 +884,21 @@ export default function AddEditEntryModal({
         if (!groupsMap.has(r.groupId)) groupsMap.set(r.groupId, []);
         groupsMap.get(r.groupId).push(r);
       }
-      const otherGroups = Array.from(groupsMap.values()).map((g) =>
+      const otherGroupRatings = Array.from(groupsMap.values());
+      const otherGroups = otherGroupRatings.map((g) =>
         g.map((r) => toEntry(r, r.score, resolveCategory(r.newCategoryName, r.ratingCategory)))
       );
 
+      // Nothing exists yet, so every rating is keyed by its position in the
+      // groups about to be written.
+      const ratingsByGroup = [[null, ...primaryGroupRatings], ...otherGroupRatings];
+      const keyByRatingId = new Map([['primary', 'new:0:0']]);
+      ratingsByGroup.forEach((members, gi) =>
+        members.forEach((r, ei) => { if (r) keyByRatingId.set(r.id, `new:${gi}:${ei}`); }));
+      const linkPlan = buildLinkPlan(form, keyByRatingId);
+
       if (onSaveGroups) {
-        onSaveGroups([[primaryEntry, ...primaryGroupExtras], ...otherGroups]);
+        onSaveGroups([[primaryEntry, ...primaryGroupExtras], ...otherGroups], linkPlan);
       } else {
         onSave([primaryEntry, ...primaryGroupExtras]);
         for (const group of otherGroups) onSave(group);
@@ -649,7 +909,7 @@ export default function AddEditEntryModal({
 
   // ── Field render helpers ──────────────────────────────────────────────────
 
-  function renderSimpleSharedFields(values, onChange, autoFocusFirst = false) {
+  function renderSimpleSharedFields(values, onChange, autoFocusFirst = false, ownerId = 'primary') {
     return (
       <>
         <Grid item xs={12} sm={6}>
@@ -663,7 +923,9 @@ export default function AddEditEntryModal({
             }}
             {...suggestionCommitProps('restaurantName', onChange)}
             renderInput={(params) => (
-              <TextField {...params} label={LABEL_RESTAURANT} size="small" fullWidth autoFocus={autoFocusFirst} />
+              <TextField {...params}
+                InputProps={withLinkAdornment(params, ownerId, 'restaurantName')}
+                label={LABEL_RESTAURANT} size="small" fullWidth autoFocus={autoFocusFirst} />
             )}
           />
         </Grid>
@@ -678,7 +940,9 @@ export default function AddEditEntryModal({
             }}
             {...suggestionCommitProps('specifier', onChange)}
             renderInput={(params) => (
-              <TextField {...params} label={LABEL_FOOD_NAME} placeholder="e.g. Chocolate" size="small" fullWidth />
+              <TextField {...params}
+                InputProps={withLinkAdornment(params, ownerId, 'specifier')}
+                label={LABEL_FOOD_NAME} placeholder="e.g. Chocolate" size="small" fullWidth />
             )}
           />
         </Grid>
@@ -686,7 +950,7 @@ export default function AddEditEntryModal({
     );
   }
 
-  function renderAdvancedSharedFields(values, onChange, onDateChange) {
+  function renderAdvancedSharedFields(values, onChange, onDateChange, ownerId = 'primary') {
     return (
       <>
         <Grid item xs={12} sm={8}>
@@ -700,7 +964,9 @@ export default function AddEditEntryModal({
             }}
             {...suggestionCommitProps('location', onChange)}
             renderInput={(params) => (
-              <TextField {...params} label={LABEL_LOCATION} placeholder="e.g. Denver" size="small" fullWidth />
+              <TextField {...params}
+                InputProps={withLinkAdornment(params, ownerId, 'location')}
+                label={LABEL_LOCATION} placeholder="e.g. Denver" size="small" fullWidth />
             )}
           />
         </Grid>
@@ -708,12 +974,14 @@ export default function AddEditEntryModal({
           <TextField label={LABEL_DATE} type="date"
             value={values.dateRated}
             onChange={(e) => onDateChange(e.target.value)}
+            InputProps={linkInputProps(ownerId, 'dateRated')}
             fullWidth size="small" InputLabelProps={{ shrink: true }} />
         </Grid>
         <Grid item xs={12}>
           <TextField label={LABEL_ADDITIONAL_INFO}
             value={values.additionalInfo}
             onChange={(e) => onChange('additionalInfo', e.target.value)}
+            InputProps={linkInputProps(ownerId, 'additionalInfo', { alignSelf: 'flex-start', mt: 1 })}
             fullWidth multiline rows={2} size="small" />
           {hasExpressions(values.additionalInfo) && (
             <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
@@ -742,6 +1010,7 @@ export default function AddEditEntryModal({
               <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
                 {LABEL_PICTURE}
               </Typography>
+              {linkAdornment(ownerId, 'picture')}
               {photoUploading ? (
                 <CircularProgress size={20} />
               ) : (
@@ -883,14 +1152,19 @@ export default function AddEditEntryModal({
             {/* Category: always in edit, advanced-only in add */}
             {(isEdit || showAdvanced) && (
               <Grid item xs={12} sm={7}>
-                <CategorySelect
-                  key={`primary-cat-${formKey}`}
-                  categories={categories}
-                  value={form.primaryRating.ratingCategory}
-                  newCategoryName={form.primaryRating.newCategoryName}
-                  onChange={makeRatingCategoryChangeHandler('primary')}
-                  label={LABEL_CATEGORY}
-                />
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Box sx={{ flex: 1 }}>
+                    <CategorySelect
+                      key={`primary-cat-${formKey}`}
+                      categories={categories}
+                      value={form.primaryRating.ratingCategory}
+                      newCategoryName={form.primaryRating.newCategoryName}
+                      onChange={makeRatingCategoryChangeHandler('primary')}
+                      label={LABEL_CATEGORY}
+                    />
+                  </Box>
+                  {linkAdornment('primary', 'ratingCategory')}
+                </Box>
               </Grid>
             )}
 
@@ -900,6 +1174,7 @@ export default function AddEditEntryModal({
                 label={LABEL_RATING}
                 value={form.primaryRating.score}
                 onChange={(e) => setPrimary('score', e.target.value)}
+                InputProps={linkInputProps('primary', 'score')}
                 fullWidth size="small"
               />
             </Grid>
@@ -936,12 +1211,8 @@ export default function AddEditEntryModal({
             {(isEdit || showAdvanced) && (
               <>
                 <Grid item xs={12}><Divider /></Grid>
-                {isEdit && renderSimpleSharedFields(form, setShared, true)}
-                {renderAdvancedSharedFields(
-                  form,
-                  setShared,
-                  (v) => setForm((f) => ({ ...f, dateRated: v, dateRatedMs: dateInputToMs(v) }))
-                )}
+                {isEdit && renderSimpleSharedFields(form, setShared, true, 'primary')}
+                {renderAdvancedSharedFields(form, setShared, (v) => setDate('primary', v), 'primary')}
                 {isEdit && renderIdenticalsEditor()}
               </>
             )}
@@ -982,19 +1253,24 @@ export default function AddEditEntryModal({
                     </Grid>
 
                     {/* Simple shared fields */}
-                    {renderSimpleSharedFields(r, (field, value) => setAdditional(idx, field, value))}
+                    {renderSimpleSharedFields(r, (field, value) => setAdditional(idx, field, value), false, r.id)}
 
                     {/* Category: advanced-only */}
                     {(isEdit || showAdvanced) && (
                       <Grid item xs={12} sm={7}>
-                        <CategorySelect
-                          key={`additional-cat-${formKey}-${r.id}`}
-                          categories={categories}
-                          value={r.ratingCategory}
-                          newCategoryName={r.newCategoryName}
-                          onChange={makeRatingCategoryChangeHandler(`additional-${idx}`)}
-                          label={LABEL_CATEGORY}
-                        />
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Box sx={{ flex: 1 }}>
+                            <CategorySelect
+                              key={`additional-cat-${formKey}-${r.id}`}
+                              categories={categories}
+                              value={r.ratingCategory}
+                              newCategoryName={r.newCategoryName}
+                              onChange={makeRatingCategoryChangeHandler(`additional-${idx}`)}
+                              label={LABEL_CATEGORY}
+                            />
+                          </Box>
+                          {linkAdornment(r.id, 'ratingCategory')}
+                        </Box>
                       </Grid>
                     )}
 
@@ -1004,6 +1280,7 @@ export default function AddEditEntryModal({
                         label={LABEL_RATING}
                         value={r.score}
                         onChange={(e) => setAdditional(idx, 'score', e.target.value)}
+                        InputProps={linkInputProps(r.id, 'score')}
                         fullWidth size="small"
                       />
                     </Grid>
@@ -1025,11 +1302,8 @@ export default function AddEditEntryModal({
                     {(isEdit || showAdvanced) && renderAdvancedSharedFields(
                       r,
                       (field, value) => setAdditional(idx, field, value),
-                      (v) => setForm((f) => {
-                        const next = [...f.additionalRatings];
-                        next[idx] = { ...next[idx], dateRated: v, dateRatedMs: dateInputToMs(v) };
-                        return { ...f, additionalRatings: next };
-                      })
+                      (v) => setDate(r.id, v),
+                      r.id,
                     )}
                   </Grid>
                 );

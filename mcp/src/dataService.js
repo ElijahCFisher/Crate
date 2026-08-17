@@ -33,6 +33,8 @@ function parseFieldValue(fieldName, value) {
       return typeof value === 'string'
         ? value.split('|').filter(Boolean)
         : Array.isArray(value) ? value : [];
+    case 'linkedFields':
+      return typeof value === 'string' ? csvService.parseLinkedFields(value) : (value || {});
     default:
       return value;
   }
@@ -77,6 +79,7 @@ const ENTRY_DEFAULTS = {
   dateRated: null,
   additionalInfo: '',
   picture: '',
+  linkedFields: {},
 };
 
 const CHANGE_METHOD = 'MCP tool';
@@ -149,7 +152,9 @@ export async function addBulkRating(fileIds, settingsFileId, groups) {
 export async function modifyEntry(fileIds, entryUuid, updates) {
   const now = Date.now();
   const changes = Object.entries(updates).map(([field, value]) =>
-    createModificationChange(entryUuid, field, Array.isArray(value) ? value.join('|') : String(value ?? ''), CHANGE_METHOD)
+    createModificationChange(entryUuid, field, field === 'linkedFields'
+      ? csvService.serializeLinkedFields(value)
+      : Array.isArray(value) ? value.join('|') : String(value ?? ''), CHANGE_METHOD)
   );
   changes.forEach((c, i) => { c.dateOfChange = now + i; });
 

@@ -6,6 +6,8 @@ import {
   generateChangelog,
   parse,
   generate,
+  parseLinkedFields,
+  serializeLinkedFields,
 } from './csvService';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -27,6 +29,7 @@ const sampleEntry = {
   dateRated: DATE_MS,
   additionalInfo: 'crispy',
   picture: 'http://img',
+  linkedFields: { restaurantName: ['x1', 'x2'], location: ['x1'] },
 };
 
 const sampleCategoryEntry = {
@@ -42,6 +45,7 @@ const sampleCategoryEntry = {
   dateRated: null,
   additionalInfo: '',
   picture: '',
+  linkedFields: {},
 };
 
 const sampleChange = {
@@ -63,6 +67,7 @@ const sampleChange = {
   entryType: 'food',
   changeMethod: 'manual, through the app',
   dateOfChange: DATE_MS,
+  linkedFields: {},
 };
 
 // ── parseCombined ─────────────────────────────────────────────────────────────
@@ -390,5 +395,49 @@ describe('generate', () => {
   it('places COMBINED marker before CHANGELOG marker', () => {
     const csv = generate({ combined: new Map(), changelog: [] });
     expect(csv.indexOf('SECTION,COMBINED')).toBeLessThan(csv.indexOf('SECTION,CHANGELOG'));
+  });
+});
+
+// ── Linked fields ─────────────────────────────────────────────────────────────
+
+describe('parseLinkedFields / serializeLinkedFields', () => {
+  it('round-trips a multi-field map', () => {
+    const map = { restaurantName: ['u1', 'u2'], location: ['u3'] };
+    expect(parseLinkedFields(serializeLinkedFields(map))).toEqual(map);
+  });
+
+  it('serializes to field:uuid;uuid groups joined by pipes', () => {
+    expect(serializeLinkedFields({ restaurantName: ['u1', 'u2'], location: ['u3'] }))
+      .toBe('restaurantName:u1;u2|location:u3');
+  });
+
+  it('treats missing and empty values as no links', () => {
+    expect(parseLinkedFields(undefined)).toEqual({});
+    expect(parseLinkedFields('')).toEqual({});
+    expect(parseLinkedFields('   ')).toEqual({});
+    expect(serializeLinkedFields(undefined)).toBe('');
+    expect(serializeLinkedFields({})).toBe('');
+  });
+
+  it('drops fields with no followers left', () => {
+    expect(serializeLinkedFields({ restaurantName: [], location: ['u1'] })).toBe('location:u1');
+  });
+
+  it('ignores malformed groups and dedupes uuids', () => {
+    expect(parseLinkedFields('nonsense|location:u1;u1;u2|:u9|score:')).toEqual({
+      location: ['u1', 'u2'],
+    });
+  });
+
+  it('survives a round trip through the combined CSV', () => {
+    const entry = { ...sampleEntry, linkedFields: { location: ['u1', 'u2'] } };
+    const csv = generateCombined({ combined: new Map([[entry.uuid, entry]]) });
+    expect(parseCombined(csv).get(entry.uuid).linkedFields).toEqual({ location: ['u1', 'u2'] });
+  });
+
+  it('carries links through an addition change in the changelog', () => {
+    const change = { ...sampleChange, linkedFields: { restaurantName: ['u1'] } };
+    const csv = generateChangelog({ changelog: [change] });
+    expect(parseChangelog(csv)[0].linkedFields).toEqual({ restaurantName: ['u1'] });
   });
 });

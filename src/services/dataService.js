@@ -27,9 +27,21 @@ function parseFieldValue(fieldName, value) {
       return typeof value === 'string'
         ? value.split('|').filter(Boolean)
         : Array.isArray(value) ? value : [];
+    case 'linkedFields':
+      return typeof value === 'string' ? csvService.parseLinkedFields(value) : (value || {});
     default:
       return value;
   }
+}
+
+/**
+ * Flatten an updates value into the changelog's single `Value` string column.
+ * `linkedFields` is an object map, so it needs its own serializer — a plain
+ * String() would write "[object Object]" into the log.
+ */
+export function serializeFieldValue(fieldName, value) {
+  if (fieldName === 'linkedFields') return csvService.serializeLinkedFields(value);
+  return Array.isArray(value) ? value.join('|') : String(value ?? '');
 }
 
 function entryFromAdditionChange(change) {
@@ -47,6 +59,7 @@ function entryFromAdditionChange(change) {
     dateRated: change.dateRated ?? null,
     additionalInfo: change.additionalInfo ?? '',
     picture: change.picture ?? '',
+    linkedFields: change.linkedFields ?? {},
   };
 }
 
@@ -96,6 +109,7 @@ const ENTRY_DEFAULTS = {
   dateRated: null,
   additionalInfo: '',
   picture: '',
+  linkedFields: {},
 };
 
 /**
@@ -158,7 +172,7 @@ export async function addCategory(fileIds, categoryData) {
 export async function modifyEntry(fileIds, entryUuid, updates) {
   const now = Date.now();
   const changes = Object.entries(updates).map(([field, value]) =>
-    createModificationChange(entryUuid, field, Array.isArray(value) ? value.join('|') : String(value ?? ''))
+    createModificationChange(entryUuid, field, serializeFieldValue(field, value))
   );
   changes.forEach((c, i) => { c.dateOfChange = now + i; });
 

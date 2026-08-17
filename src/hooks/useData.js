@@ -477,6 +477,7 @@ export function useData(isAuthenticated) {
       dateRated: Date.now(),
       additionalInfo: '',
       picture: '',
+      linkedFields: {},
       ...d,
       categories: computeCategories(d.ratingCategory || '', currentCombined),
     }));
@@ -543,6 +544,7 @@ export function useData(isAuthenticated) {
         dateRated: Date.now(),
         additionalInfo: '',
         picture: '',
+        linkedFields: {},
         ...d,
         categories: computeCategories(d.ratingCategory || '', currentCombined),
       }));
@@ -598,6 +600,7 @@ export function useData(isAuthenticated) {
       dateRated: categoryData.dateRated ?? null,
       additionalInfo: categoryData.additionalInfo || '',
       picture: '',
+      linkedFields: {},
       specifier: '',
       location: '',
       categories: computeCategories(categoryData.ratingCategory || '', currentCombined),
@@ -631,7 +634,7 @@ export function useData(isAuthenticated) {
   const modifyEntry = useCallback((uuid, updates) => {
     const now = Date.now();
     const changes = Object.entries(updates).map(([field, value]) =>
-      createModificationChange(uuid, field, Array.isArray(value) ? value.join('|') : String(value ?? ''))
+      createModificationChange(uuid, field, dataService.serializeFieldValue(field, value))
     );
     changes.forEach((c, i) => { c.dateOfChange = now + i; });
     const newChangelog = [...changelogRef.current, ...changes];
@@ -734,6 +737,7 @@ export function useData(isAuthenticated) {
       dateRated: Date.now(),
       additionalInfo: '',
       picture: '',
+      linkedFields: {},
       ...d,
       categories: computeCategories(d.ratingCategory || '', currentCombined),
     }));
