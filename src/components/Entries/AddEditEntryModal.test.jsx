@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { applyLinkedChange, buildLinkPlan } from './AddEditEntryModal';
+import {
+  applyLinkedChange, buildLinkPlan, applyTextToForm, formToRatings,
+} from './AddEditEntryModal';
+import { generateTextLines } from '../../utils/textModeUtils';
 import { LINKABLE_FIELDS } from '../../utils/linkUtils';
 
 /**
@@ -128,5 +131,99 @@ describe('buildLinkPlan', () => {
     const form = makeForm([follower(1, 99)]);
     const plan = buildLinkPlan(form, new Map([['primary', 'uuid:leader'], [1, 'uuid:x']]));
     expect(plan.links).toEqual([]);
+  });
+});
+
+describe('applyTextToForm', () => {
+  const categories = [{ uuid: 'c-greek', restaurantName: 'greek', ratingCategory: '' }];
+
+  function baselineFor(form) {
+    return generateTextLines(formToRatings(form), categories);
+  }
+
+  /** A form whose primary rating is already filled in. */
+  function filledForm(additionalRatings = []) {
+    const form = makeForm(additionalRatings);
+    return {
+      ...form,
+      location: 'Denver',
+      specifier: 'Gyro',
+      primaryRating: { ...form.primaryRating, score: '8' },
+    };
+  }
+
+  it('edits the existing rating rather than creating a new one', () => {
+    const form = makeForm([]);
+    const lines = baselineFor(form);
+    const edited = lines.map((l) => l.text).join('\n').replace('Guess', 'Zorba');
+
+    const { form: next } = applyTextToForm(form, edited, categories, lines);
+    expect(next.restaurantName).toBe('Zorba');
+    expect(next.additionalRatings).toHaveLength(0);
+  });
+
+  it('turns an added line into a new rating', () => {
+    const form = filledForm();
+    const lines = baselineFor(form);
+    const withExtra = `${lines.map((l) => l.text).join('\n')}\nFries 5 salty`;
+
+    const { form: next } = applyTextToForm(form, withExtra, categories, lines);
+    expect(next.additionalRatings).toHaveLength(1);
+    expect(next.additionalRatings[0]).toMatchObject({
+      specifier: 'Fries',
+      score: '5',
+      additionalInfo: 'salty',
+      linkParentId: null,
+    });
+  });
+
+  it('leaves a rating alone when its line is deleted', () => {
+    const form = makeForm([follower(1, null, { linkedFields: [], specifier: 'Fries', score: '5' })]);
+    const lines = baselineFor(form);
+    const withoutFries = lines
+      .map((l) => l.text)
+      .filter((t) => !t.includes('Fries'))
+      .join('\n');
+
+    const { form: next } = applyTextToForm(form, withoutFries, categories, lines);
+    expect(next.additionalRatings).toHaveLength(1);
+    expect(next.additionalRatings[0].specifier).toBe('Fries');
+  });
+
+  it('carries a linked field to followers, same as typing in the form', () => {
+    const form = makeForm([follower(1, 'primary')]);
+    const lines = baselineFor(form);
+    const edited = lines.map((l) => l.text).join('\n').replace('Guess', 'Zorba');
+
+    const { form: next } = applyTextToForm(form, edited, categories, lines);
+    expect(next.restaurantName).toBe('Zorba');
+    expect(next.additionalRatings[0].restaurantName).toBe('Zorba');
+  });
+
+  it('fills a blank primary rating instead of stranding it', () => {
+    const form = makeForm([]);
+    const lines = baselineFor(form);
+
+    const { form: next } = applyTextToForm(form, 'Zorba\nDenver\nGyro 8 greek', categories, lines);
+    expect(next).toMatchObject({ restaurantName: 'Zorba', location: 'Denver', specifier: 'Gyro' });
+    expect(next.primaryRating.score).toBe('8');
+    expect(next.additionalRatings).toHaveLength(0);
+  });
+
+  it('keeps a restaurant typed before any ratings', () => {
+    const form = makeForm([]);
+    const lines = baselineFor(form);
+
+    const { form: next } = applyTextToForm(form, 'Zorba\nDenver', categories, lines);
+    expect(next).toMatchObject({ restaurantName: 'Zorba', location: 'Denver' });
+  });
+
+  it('reports unparseable lines without dropping the good ones', () => {
+    const form = filledForm();
+    const lines = baselineFor(form);
+    const text = `${lines.map((l) => l.text).join('\n')}\nFries no score here`;
+
+    const { errors } = applyTextToForm(form, text, categories, lines);
+    expect(errors).toHaveLength(1);
   });
 });

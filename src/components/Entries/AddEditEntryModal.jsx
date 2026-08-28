@@ -15,6 +15,8 @@ import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Box from '@mui/material/Box';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -31,6 +33,7 @@ import ImageLightbox from '../ImageLightbox';
 import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
 import { evalAdditionalInfo, hasExpressions } from '../../utils/mathUtils';
 import { LINKABLE_FIELDS } from '../../utils/linkUtils';
+import { parseText, generateTextLines, alignLines } from '../../utils/textModeUtils';
 import {
   LABEL_RESTAURANT, LABEL_FOOD_NAME, LABEL_RATING, LABEL_CATEGORY,
   LABEL_LOCATION, LABEL_DATE, LABEL_ADDITIONAL_INFO, LABEL_PICTURE,
@@ -414,6 +417,134 @@ function entriesToForm(entries) {
   return { ...shared, primaryRating, primaryOriginalUuid: primaryEntry.uuid, additionalRatings: linked };
 }
 
+// ── Text mode ────────────────────────────────────────────────────────────────
+
+/** The fields text mode is responsible for; date, picture and identicals stay in the form. */
+const TEXT_FIELDS = ['restaurantName', 'location', 'specifier', 'score', 'ratingCategory', 'additionalInfo'];
+
+function readRatingField(form, ratingId, field) {
+  if (ratingId === 'primary') {
+    if (field === 'score' || field === 'ratingCategory') return form.primaryRating[field] ?? '';
+    return form[field] ?? '';
+  }
+  const rating = form.additionalRatings.find((r) => r.id === ratingId);
+  return rating ? (rating[field] ?? '') : undefined;
+}
+
+/** Flatten the form into the neutral shape textModeUtils renders. */
+export function formToRatings(form) {
+  return [
+    {
+      id: 'primary',
+      restaurantName: form.restaurantName || '',
+      location: form.location || '',
+      specifier: form.specifier || '',
+      score: form.primaryRating.score || '',
+      ratingCategory: form.primaryRating.ratingCategory || '',
+      additionalInfo: form.additionalInfo || '',
+    },
+    ...form.additionalRatings.map((r) => ({
+      id: r.id,
+      restaurantName: r.restaurantName || '',
+      location: r.location || '',
+      specifier: r.specifier || '',
+      score: r.score || '',
+      ratingCategory: r.ratingCategory || '',
+      additionalInfo: r.additionalInfo || '',
+    })),
+  ];
+}
+
+/**
+ * Fold edited text back into the form. Each line is matched to the rating it
+ * was rendered from, so editing a line edits that rating rather than making a
+ * new one; lines with no match become new ratings. A rating whose line was
+ * deleted is deliberately left alone — removing text never deletes data.
+ *
+ * Values are written through applyLinkedChange, so text edits respect field
+ * links exactly like typing in the form does: changing a leader carries to its
+ * followers, and giving a follower its own value unlinks that one field.
+ */
+export function applyTextToForm(form, text, categories, baselineLines) {
+  const { ratings, errors, blocks } = parseText(text, categories);
+  const currentTexts = String(text ?? '').split(/\r?\n/);
+  const matched = alignLines(baselineLines.map((line) => line.text), currentTexts);
+
+  let next = form;
+  const idByLine = new Map();
+  const pending = [];
+
+  for (const parsed of ratings) {
+    const baseIndex = matched[parsed.lineNumber - 1];
+    const id = baseIndex >= 0 ? (baselineLines[baseIndex]?.id ?? null) : null;
+    const values = {
+      restaurantName: parsed.restaurantName,
+      location: parsed.location,
+      specifier: parsed.specifier,
+      score: parsed.score,
+      ratingCategory: parsed.ratingCategory,
+      additionalInfo: parsed.additionalInfo,
+    };
+
+    const exists = id !== null && readRatingField(next, id, 'specifier') !== undefined;
+    if (exists) {
+      for (const field of TEXT_FIELDS) {
+        if (readRatingField(next, id, field) === values[field]) continue;
+        next = applyLinkedChange(next, id, field, { [field]: values[field] });
+      }
+      idByLine.set(parsed.lineNumber, id);
+    } else {
+      pending.push({ values, lineNumber: parsed.lineNumber });
+    }
+  }
+
+  // A brand new entry starts with a blank primary rating and no line of its
+  // own. Fill that slot first so typing in text mode doesn't leave an empty
+  // rating stranded next to the one you actually wrote.
+  const claimed = new Set(idByLine.values());
+  const primaryIsBlank = !claimed.has('primary') &&
+    ['specifier', 'score', 'ratingCategory', 'additionalInfo']
+      .every((field) => !readRatingField(next, 'primary', field));
+
+  if (primaryIsBlank && pending.length > 0) {
+    const first = pending.shift();
+    for (const field of TEXT_FIELDS) {
+      if (readRatingField(next, 'primary', field) === first.values[field]) continue;
+      next = applyLinkedChange(next, 'primary', field, { [field]: first.values[field] });
+    }
+    idByLine.set(first.lineNumber, 'primary');
+  } else if (primaryIsBlank) {
+    // Only a restaurant/location typed so far — still worth keeping.
+    const header = blocks.find((b) => b.ratingCount === 0);
+    if (header) {
+      for (const field of ['restaurantName', 'location']) {
+        if (readRatingField(next, 'primary', field) === header[field]) continue;
+        next = applyLinkedChange(next, 'primary', field, { [field]: header[field] });
+      }
+    }
+  }
+
+  if (pending.length > 0) {
+    const additions = pending.map(({ values, lineNumber }) => {
+      const rating = {
+        ...makeAdditionalRating(values),
+        dateRated: form.dateRated,
+        dateRatedMs: form.dateRatedMs ?? null,
+      };
+      idByLine.set(lineNumber, rating.id);
+      return rating;
+    });
+    next = { ...next, additionalRatings: [...next.additionalRatings, ...additions] };
+  }
+
+  const lines = currentTexts.map((lineText, i) => ({
+    text: lineText,
+    id: idByLine.get(i + 1) ?? null,
+  }));
+
+  return { form: next, errors, lines };
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 
@@ -455,6 +586,12 @@ export default function AddEditEntryModal({
   const [filenameLookupStatus, setFilenameLookupStatus] = useState(null); // 'found' | 'not_found' | 'searching'
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lastUnlink, setLastUnlink] = useState(null);
+  const [mode, setMode] = useState('form');
+  const [text, setText] = useState('');
+  const [textErrors, setTextErrors] = useState([]);
+  const textRef = useRef('');
+  const textBaselineRef = useRef([]);
+  const textDirtyRef = useRef(false);
   const photoInputRef = useRef(null);
   const photoGalleryRef = useRef(null);
   const highlightedSuggestionsRef = useRef({});
@@ -464,6 +601,9 @@ export default function AddEditEntryModal({
       setShowAdvanced(showAdvancedByDefault);
       setShowIdenticalsEditor(false);
       setLastUnlink(null);
+      setMode('form');
+      setTextErrors([]);
+      textDirtyRef.current = false;
       setFormKey((k) => k + 1);
       if (!entry && initialEntries && initialEntries.length > 0) {
         setForm(entriesToForm(initialEntries));
@@ -710,10 +850,82 @@ export default function AddEditEntryModal({
     };
   }
 
+  // ── Text mode ───────────────────────────────────────────────────────────────
+
+  /** Render the current ratings into the box and remember what each line was. */
+  function enterTextMode() {
+    const lines = generateTextLines(formToRatings(form), categories);
+    const rendered = lines.map((line) => line.text).join('\n');
+    textBaselineRef.current = lines;
+    textRef.current = rendered;
+    textDirtyRef.current = false;
+    setText(rendered);
+    setTextErrors([]);
+    setMode('text');
+  }
+
+  /**
+   * Fold any pending text edits into the form and hand back the updated form,
+   * so the submit path can use it without waiting for the state to flush.
+   */
+  function commitText() {
+    if (!textDirtyRef.current) return form;
+    const result = applyTextToForm(form, textRef.current, categories, textBaselineRef.current);
+    textBaselineRef.current = result.lines;
+    textDirtyRef.current = false;
+    setTextErrors(result.errors);
+    setForm(result.form);
+    return result.form;
+  }
+
+  function handleModeChange(nextMode) {
+    if (nextMode === mode) return;
+    if (nextMode === 'text') enterTextMode();
+    else { commitText(); setMode('form'); }
+  }
+
+  function renderTextMode() {
+    return (
+      <Box>
+        <TextField
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            textRef.current = e.target.value;
+            textDirtyRef.current = true;
+          }}
+          onBlur={commitText}
+          fullWidth
+          multiline
+          minRows={10}
+          spellCheck={false}
+          autoComplete="off"
+          InputProps={{ sx: { fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: 1.6 } }}
+          placeholder={"Zorba's\nDenver\nGyro 8 greek really tender\n  Fries 5 too salty"}
+        />
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+          Restaurant, then location, then one rating per line:
+          {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>food  score  category  notes</Box>.
+          Indent a line to log it as part of the rating above it. A blank line starts a new restaurant.
+          Categories are only matched to ones you already have — never created.
+        </Typography>
+        {textErrors.length > 0 && (
+          <Alert severity="warning" sx={{ mt: 1.5 }}>
+            {textErrors.map((err) => (
+              <div key={err.lineNumber}>Line {err.lineNumber}: {err.message}</div>
+            ))}
+          </Alert>
+        )}
+      </Box>
+    );
+  }
+
   // ── Submit ──────────────────────────────────────────────────────────────────
 
   function handleSubmit(e) {
     e.preventDefault();
+    // Text edits are folded in first, so both tabs save the same thing.
+    const form = commitText();
 
     // Resolve a pending new-category name to a UUID, deduped by lowercase name.
     const newCatCache = new Map();
@@ -1130,6 +1342,19 @@ export default function AddEditEntryModal({
         <DialogContent dividers>
           {saveError && <Alert severity="error" sx={{ mb: 2 }}>{saveError}</Alert>}
 
+          <Tabs
+            value={mode}
+            onChange={(_, v) => handleModeChange(v)}
+            sx={{ mb: 2, borderBottom: 1, borderColor: 'divider', minHeight: 36 }}
+          >
+            <Tab label="Form" value="form" sx={{ minHeight: 36, py: 0 }} />
+            <Tab label="Text" value="text" sx={{ minHeight: 36, py: 0 }} />
+          </Tabs>
+
+          {mode === 'text' && renderTextMode()}
+
+          {/* Kept mounted so switching tabs doesn't lose focus or scroll position. */}
+          <Box sx={{ display: mode === 'form' ? 'block' : 'none' }}>
           <Grid container spacing={2}>
             {/* ── UUID (read-only, edit mode only) ─────────────────────── */}
             {isEdit && entry?.uuid && (
@@ -1337,6 +1562,7 @@ export default function AddEditEntryModal({
               );
             })()}
           </Grid>
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose} disabled={loading}>Cancel</Button>
