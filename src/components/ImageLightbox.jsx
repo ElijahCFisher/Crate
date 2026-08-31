@@ -35,6 +35,43 @@ export default function ImageLightbox({ open, onClose, src, fileId }) {
     setPan(p);
   }, []);
 
+  // Kept in a ref so the history effect below depends only on `open` — callers
+  // pass an inline onClose, and re-running on every render would stack up a
+  // history entry per render.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
+  // Give the back gesture / back button something to pop, so it closes the
+  // photo instead of leaving the app. The ref survives StrictMode's
+  // mount/unmount/remount, which is what keeps this to a single history entry
+  // — popping from a discarded first mount would otherwise fire popstate and
+  // close the photo the instant it opened.
+  const historyPushedRef = useRef(false);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    if (!historyPushedRef.current) {
+      window.history.pushState({ crateLightbox: true }, '');
+      historyPushedRef.current = true;
+    }
+
+    const handlePopState = () => {
+      historyPushedRef.current = false; // the entry we pushed is already gone
+      onCloseRef.current?.();
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [open]);
+
+  // Closed some other way (X, backdrop, Esc): drop the entry we pushed so back
+  // doesn't have to be pressed twice to leave the page.
+  useEffect(() => {
+    if (open || !historyPushedRef.current) return;
+    historyPushedRef.current = false;
+    window.history.back();
+  }, [open]);
+
   useEffect(() => {
     if (!open) {
       setImageSrc(null);

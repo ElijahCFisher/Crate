@@ -213,10 +213,48 @@ export async function uploadPhoto(folderId, uuid, file) {
   return data.id;
 }
 
+// Photos are written once under a random name and never rewritten, so a cached
+// copy can't go stale — worth keeping so revisiting an entry (or scrolling the
+// table) doesn't re-download, and so photos still show up offline. The browser
+// evicts this under storage pressure on its own; a miss just re-fetches.
+const PHOTO_CACHE = 'crate-photos-v1';
+const photoCacheKey = (fileId) => `https://crate.local/photo/${encodeURIComponent(fileId)}`;
+
+async function openPhotoCache() {
+  if (typeof caches === 'undefined') return null;
+  try {
+    return await caches.open(PHOTO_CACHE);
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchPhotoBlob(fileId) {
+  const cache = await openPhotoCache();
+  const key = photoCacheKey(fileId);
+
+  if (cache) {
+    try {
+      const hit = await cache.match(key);
+      if (hit) return await hit.blob();
+    } catch { /* fall through to the network */ }
+  }
+
   const res = await driveFetch(`${DRIVE_API}/files/${fileId}?alt=media`);
   if (!res.ok) throw new Error(`Photo fetch failed: ${res.status}`);
-  return res.blob();
+  const blob = await res.blob();
+
+  if (cache) {
+    // Storing consumes the Response we build here, not `blob` itself.
+    try { await cache.put(key, new Response(blob)); } catch { /* quota — not fatal */ }
+  }
+  return blob;
+}
+
+/** Drop every cached photo — called on sign-out so the next user starts clean. */
+export async function clearPhotoCache() {
+  if (typeof caches === 'undefined') return;
+  try { await caches.delete(PHOTO_CACHE); } catch { /* nothing to clean up */ }
 }
 
 export async function getUserProfile() {

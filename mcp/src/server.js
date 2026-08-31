@@ -58,6 +58,38 @@ function categoryPath(uuid, combined) {
   return parts.join(' / ');
 }
 
+/**
+ * Read a date or a full timestamp into epoch ms.
+ * A bare YYYY-MM-DD still means local midnight, exactly as before; anything
+ * else goes through Date, so ISO 8601 with a time (and optional timezone)
+ * works — "2026-08-31T19:42", "2026-08-31T19:42:00Z", "2026-08-31 19:42".
+ * Epoch ms passes straight through.
+ */
+export function parseDateTimeInput(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') return value;
+
+  const str = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const ms = new Date(`${str}T00:00:00`).getTime();
+    if (Number.isNaN(ms)) throw new Error(`Could not read "${str}" as a date.`);
+    return ms;
+  }
+
+  const ms = new Date(str.replace(' ', 'T')).getTime();
+  if (Number.isNaN(ms)) {
+    throw new Error(
+      `Could not read "${str}" as a date or time. Use YYYY-MM-DD for a date, ` +
+      'or an ISO 8601 timestamp like 2026-08-31T19:42:00 for an exact time.'
+    );
+  }
+  return ms;
+}
+
+const DATE_INPUT_HELP =
+  'YYYY-MM-DD for a date, or an ISO 8601 timestamp for an exact time ' +
+  '(e.g. 2026-08-31T19:42:00, or ...Z for UTC). Times are stored to the millisecond.';
+
 function summarizeEntry(entry, combined) {
   return {
     uuid: entry.uuid,
@@ -66,7 +98,10 @@ function summarizeEntry(entry, combined) {
     location: entry.location || undefined,
     score: entry.score ?? null,
     category: entry.ratingCategory ? categoryPath(entry.ratingCategory, combined) : undefined,
+    // dateRated stays YYYY-MM-DD because that's the format the date filters
+    // take; ratedAt carries the exact stored time alongside it.
     dateRated: entry.dateRated ? new Date(entry.dateRated).toISOString().slice(0, 10) : undefined,
+    ratedAt: entry.dateRated ? new Date(entry.dateRated).toISOString() : undefined,
     notes: entry.additionalInfo || undefined,
     identicals: entry.identicals?.length ? entry.identicals : undefined,
   };
@@ -107,7 +142,7 @@ function buildEntryData({ restaurantName, specifier, location, score, category, 
       additionalInfo: notes || '',
       ratingCategory,
       categories: ratingCategory ? dataService.computeCategories(ratingCategory, combined) : [],
-      dateRated: dateRated ? new Date(dateRated + 'T00:00:00').getTime() : Date.now(),
+      dateRated: dateRated ? parseDateTimeInput(dateRated) : Date.now(),
     },
   };
 }
@@ -157,7 +192,7 @@ server.registerTool(
   'search_ratings',
   {
     title: 'Search food ratings',
-    description: `Search Crate food entries — this calls the app's real filter engine (FilterBuilder.applyFilters), same fields/operators as the Filters panel in the app. Fields: ${FILTER_FIELDS.join(', ')}. Text ops (most fields): contains, equals, notContains, isEmpty, isNotEmpty. Date ops (field="dateRated"): dateOn, dateBefore, dateAfter, isEmpty, isNotEmpty — value is "YYYY-MM-DD". Rating ops (field="score"): ratingEquals, ratingNotEquals, ratingGreater, ratingGreaterOrEqual, ratingLess, ratingLessOrEqual, isEmpty, isNotEmpty — value is a number as a string, e.g. "7.5". Multiple filters combine left to right via each one's own "connector" (AND/OR) — same as the app's default un-edited logic; no parenthesized custom logic.`,
+    description: `Search Crate food entries — this calls the app's real filter engine (FilterBuilder.applyFilters), same fields/operators as the Filters panel in the app. Fields: ${FILTER_FIELDS.join(', ')}. Text ops (most fields): contains, equals, notContains, isEmpty, isNotEmpty. Date ops (field="dateRated"): dateOn, dateBefore, dateAfter, isEmpty, isNotEmpty — value is "YYYY-MM-DD". Rating ops (field="score"): ratingEquals, ratingNotEquals, ratingGreater, ratingGreaterOrEqual, ratingLess, ratingLessOrEqual, isEmpty, isNotEmpty — value is a number as a string, e.g. "7.5". Multiple filters combine left to right via each one's own "connector" (AND/OR) — same as the app's default un-edited logic; no parenthesized custom logic. Each result carries both "dateRated" (YYYY-MM-DD, the format these filters take) and "ratedAt" (full ISO 8601 timestamp) — read "ratedAt" when the exact time matters.`,
     inputSchema: {
       filters: z.array(z.object(filterInput)).min(1).max(20),
       limit: z.number().int().positive().max(200).default(25),
@@ -188,7 +223,7 @@ const ratingInput = {
   category: z.string().optional(),
   categoryUuid: z.string().optional(),
   notes: z.string().optional(),
-  dateRated: z.string().optional().describe('YYYY-MM-DD; defaults to today.'),
+  dateRated: z.string().optional().describe(`${DATE_INPUT_HELP} Defaults to now.`),
 };
 
 server.registerTool(
@@ -240,7 +275,7 @@ server.registerTool(
       category: z.string().optional(),
       categoryUuid: z.string().optional(),
       identicals: z.array(z.string()).optional().describe('Full replacement list of uuids this entry is identicals with. Pass [] to clear.'),
-      dateRated: z.string().optional().describe('YYYY-MM-DD.'),
+      dateRated: z.string().optional().describe(DATE_INPUT_HELP),
       fields: z.record(z.string(), z.any()).optional().describe('Raw field/value pairs passed straight to dataService.modifyEntry, for anything the named parameters above don\'t cover.'),
     },
   },
@@ -257,7 +292,7 @@ server.registerTool(
       if (score !== undefined) updates.score = String(roundToValidScore(score));
       if (notes !== undefined) updates.additionalInfo = notes;
       if (identicals !== undefined) updates.identicals = identicals;
-      if (dateRated !== undefined) updates.dateRated = new Date(dateRated + 'T00:00:00').getTime();
+      if (dateRated !== undefined) updates.dateRated = parseDateTimeInput(dateRated);
 
       if (categoryUuid !== undefined) {
         if (categoryUuid && !combined.has(categoryUuid)) return errorResult(new Error(`categoryUuid ${categoryUuid} does not exist.`));

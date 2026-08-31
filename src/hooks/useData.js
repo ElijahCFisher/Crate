@@ -644,7 +644,16 @@ export function useData(isAuthenticated) {
     setCombined((prev) => {
       const next = new Map(prev);
       const e = next.get(uuid);
-      if (e) next.set(uuid, { ...e, ...updates });
+      if (e) {
+        const updated = { ...e, ...updates };
+        // Mirror dataService.modifyEntry: the ancestor cache has to follow the
+        // category, or filters and subtree counts read the old tree until the
+        // next load from Drive.
+        if ('ratingCategory' in updates) {
+          updated.categories = computeCategories(updated.ratingCategory, next);
+        }
+        next.set(uuid, updated);
+      }
       newCombined = next;
       return next;
     });

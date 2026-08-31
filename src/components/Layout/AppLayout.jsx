@@ -466,6 +466,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         open={findReplaceOpen}
         onClose={() => setFindReplaceOpen(false)}
         foodEntries={foodEntries}
+        categories={categories}
         onReplaceAll={handleReplaceAll}
       />
 

@@ -22,7 +22,9 @@
       "PowerShell(Get-PSDrive C | Select-Object Used, Free, @{N='FreeGB';E={[math]::Round\\($_.Free/1GB,2\\)}}, @{N='UsedGB';E={[math]::Round\\($_.Used/1GB,2\\)}})",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Elij\\\\Documents\\\\Programming\\\\Crate\" -Recurse -Directory)",
       "Bash(Select-Object -ExpandProperty FullName)",
-      "Bash(Sort-Object)"
+      "Bash(Sort-Object)",
+      "Bash(sed -i 's/^function parseDateTimeInput\\(value\\) {/export function parseDateTimeInput\\(value\\) {/' mcp/src/server.js)",
+      "Bash(node --input-type=module -e ' *)"
     ]
   }
 }

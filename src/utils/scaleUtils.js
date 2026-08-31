@@ -220,6 +220,51 @@ export function convertToBaseScore(score, categoryUuid, categoriesMap) {
 }
 
 /**
+ * The categories whose scores sit between `categoryUuid` and the root, in the
+ * order convertToBaseScore consumes them (own category first). The root's own
+ * score is never part of a conversion — it *is* the base scale.
+ */
+function scaleChainToRoot(categoryUuid, categoriesMap) {
+  const chain = [];
+  let currentUuid = categoryUuid;
+  const seen = new Set();
+  while (currentUuid && !seen.has(currentUuid)) {
+    seen.add(currentUuid);
+    const category = categoriesMap.get(currentUuid);
+    if (!category || !category.ratingCategory) break;
+    const catScore = parseFloat(category.score);
+    if (!Number.isFinite(catScore)) break;
+    chain.push(catScore);
+    currentUuid = category.ratingCategory;
+  }
+  return chain;
+}
+
+/**
+ * Re-express a score from one category's scale in another's, so it keeps the
+ * same meaning after the entry is moved. Converts up to the shared base scale,
+ * then back down the destination's chain.
+ *
+ * An uncategorized entry is treated as already being in base scale, which is
+ * the same assumption convertToBaseScore and the table's stats make.
+ */
+export function convertBetweenScales(score, fromCategoryUuid, toCategoryUuid, categoriesMap) {
+  const parsed = parseFloat(score);
+  if (!Number.isFinite(parsed)) return parsed;
+  if (fromCategoryUuid === toCategoryUuid) return parsed;
+
+  const base = convertToBaseScore(parsed, fromCategoryUuid, categoriesMap);
+  if (!Number.isFinite(base)) return base;
+
+  const chain = scaleChainToRoot(toCategoryUuid, categoriesMap);
+  let result = base;
+  for (let i = chain.length - 1; i >= 0; i--) {
+    result = convertToChildScale(result, chain[i]);
+  }
+  return result;
+}
+
+/**
  * Returns the root (base) category entry — the one with no parent.
  */
 export function getBaseCategory(categoryUuid, categoriesMap) {

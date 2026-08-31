@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useGoogleLogin } from '@react-oauth/google';
 import { API_BASE, GOOGLE_AUTH_SCOPE } from '../config';
 import { clearGoogleAccessToken } from '../services/googleTokenService';
-import { getUserProfile } from '../services/driveService';
+import { getUserProfile, clearPhotoCache } from '../services/driveService';
 
 const SCOPE_STORAGE_KEY = 'food_rating_auth_scope';
 
@@ -162,6 +162,7 @@ export function useAuth() {
       await workerFetch('/logout', { method: 'POST' });
     } finally {
       clearGoogleAccessToken();
+      clearPhotoCache();
       setIsAuthenticated(false);
       setUserProfile(null);
     }

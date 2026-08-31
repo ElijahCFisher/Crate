@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -14,7 +14,10 @@ import Tooltip from '@mui/material/Tooltip';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import ConvertScalePanel from './ConvertScalePanel';
 import {
   LABEL_RESTAURANT, LABEL_FOOD_NAME, LABEL_LOCATION, LABEL_NOTES,
 } from '../../constants/fieldLabels';
@@ -50,7 +53,10 @@ function replaceInString(str, find, replace, caseSensitive, useRegex) {
   return str.replace(new RegExp(escaped, caseSensitive ? 'g' : 'gi'), replace);
 }
 
-export default function FindReplaceDialog({ open, onClose, foodEntries, onReplaceAll }) {
+export default function FindReplaceDialog({ open, onClose, foodEntries, categories = [], onReplaceAll }) {
+  const [mode, setMode] = useState('replace');
+  const [convertChanges, setConvertChanges] = useState([]);
+  const [lastConvertCount, setLastConvertCount] = useState(null);
   const [findValue, setFindValue] = useState('');
   const [replaceValue, setReplaceValue] = useState('');
   const [field, setField] = useState('restaurantName');
@@ -82,13 +88,41 @@ export default function FindReplaceDialog({ open, onClose, foodEntries, onReplac
     setLastReplaceCount(matches.length);
   }
 
+  const handleConvertPreview = useCallback((changes) => setConvertChanges(changes), []);
+  const handleConvertDirty = useCallback(() => setLastConvertCount(null), []);
+
+  function handleConvertAll() {
+    if (!convertChanges.length) return;
+    onReplaceAll(convertChanges);
+    setLastConvertCount(convertChanges.length);
+  }
+
   const fieldLabel = REPLACEABLE_FIELDS.find((f) => f.value === field)?.label ?? field;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>Find &amp; Replace</DialogTitle>
       <DialogContent>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+        <Tabs
+          value={mode}
+          onChange={(_, v) => setMode(v)}
+          sx={{ borderBottom: 1, borderColor: 'divider', minHeight: 36 }}
+        >
+          <Tab label="Replace text" value="replace" sx={{ minHeight: 36, py: 0 }} />
+          <Tab label="Convert scale" value="convert" sx={{ minHeight: 36, py: 0 }} />
+        </Tabs>
+
+        {mode === 'convert' && (
+          <ConvertScalePanel
+            foodEntries={foodEntries}
+            categories={categories}
+            onPreviewChange={handleConvertPreview}
+            onDirty={handleConvertDirty}
+            resultCount={lastConvertCount}
+          />
+        )}
+
+        <Box sx={{ display: mode === 'replace' ? 'flex' : 'none', flexDirection: 'column', gap: 2, mt: 1 }}>
           {/* Field selector */}
           <FormControl size="small" sx={{ width: 220 }}>
             <InputLabel>Field</InputLabel>
@@ -198,13 +232,23 @@ export default function FindReplaceDialog({ open, onClose, foodEntries, onReplac
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Close</Button>
-        <Button
-          variant="contained"
-          onClick={handleReplaceAll}
-          disabled={!matches.length || regexError}
-        >
-          Replace All ({matches.length})
-        </Button>
+        {mode === 'replace' ? (
+          <Button
+            variant="contained"
+            onClick={handleReplaceAll}
+            disabled={!matches.length || regexError}
+          >
+            Replace All ({matches.length})
+          </Button>
+        ) : (
+          <Button
+            variant="contained"
+            onClick={handleConvertAll}
+            disabled={!convertChanges.length}
+          >
+            Convert All ({convertChanges.length})
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );
