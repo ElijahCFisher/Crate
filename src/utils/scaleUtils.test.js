@@ -104,3 +104,29 @@ describe('converted scores snap to the app scale', () => {
     expect(roundToValidScore(9.44)).toBe(9.4);
   });
 });
+
+describe('converting a mixed result set into one category', () => {
+  it('converts each entry from its own category, not a shared source', () => {
+    // The same raw number under two different scales does NOT mean the same
+    // thing, so moving both into one destination has to produce two different
+    // results — that's the whole point of converting per source category.
+    const fromHarsh = convertBetweenScales(5, 'harsh', 'mid', map);
+    const fromKind = convertBetweenScales(5, 'kind', 'mid', map);
+
+    // 5 under "harsh" means 3 in base; 5 under "kind" means 8 in base.
+    expect(fromHarsh).toBeCloseTo(3, 10);
+    expect(fromKind).toBeCloseTo(8, 10);
+    expect(fromHarsh).not.toBeCloseTo(fromKind, 5);
+  });
+
+  it('leaves an entry already in the destination untouched', () => {
+    expect(convertBetweenScales(7, 'mid', 'mid', map)).toBe(7);
+  });
+
+  it('handles an uncategorized entry in the same pass', () => {
+    // No category means base scale, so moving it into a harsh category has to
+    // raise the number the same way any other base-scale score would.
+    expect(convertBetweenScales(3, '', 'harsh', map))
+      .toBeCloseTo(convertBetweenScales(3, 'root', 'harsh', map), 10);
+  });
+});
