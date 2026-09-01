@@ -95,6 +95,30 @@ describe('category filters', () => {
     expect(applyFilters(nestedEntries, categoryFilter, nestedCategories).map((entry) => entry.uuid))
       .toEqual(['nested-entry']);
   });
+
+  it('matches equals against an individual category name, not the full ancestor string', () => {
+    const nestedCategories = [
+      { uuid: 'root', restaurantName: 'Food', ratingCategory: '' },
+      { uuid: 'breakfast', restaurantName: 'Breakfast', ratingCategory: 'root' },
+      { uuid: 'pancakes', restaurantName: 'Pancakes', ratingCategory: 'breakfast' },
+    ];
+    const nestedEntries = [
+      {
+        uuid: 'pancake-entry',
+        restaurantName: 'Snooze',
+        specifier: 'Stack',
+        ratingCategory: 'pancakes',
+        categories: [],
+        score: '8',
+      },
+    ];
+    const categoryFilter = [
+      { id: 1, field: 'ratingCategory', op: 'equals', value: 'Breakfast', connector: 'AND', caseSensitive: false, useRegex: false },
+    ];
+
+    expect(applyFilters(nestedEntries, categoryFilter, nestedCategories).map((entry) => entry.uuid))
+      .toEqual(['pancake-entry']);
+  });
 });
 
 describe('rating filters', () => {

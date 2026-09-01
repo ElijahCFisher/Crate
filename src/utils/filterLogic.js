@@ -298,6 +298,10 @@ export function applyFilters(entries, filters, categories, logic = '') {
  * including the direct parent. Uses entry.categories (precomputed ancestor UUID list).
  */
 function allCatNamesStr(entry, catMap) {
+  return categoryNames(entry, catMap).join(' ');
+}
+
+function categoryNames(entry, catMap) {
   const names = [];
   const seenUuids = new Set();
 
@@ -322,7 +326,7 @@ function allCatNamesStr(entry, catMap) {
     addCategoryPath(uuid);
   }
 
-  return names.join(' ');
+  return names;
 }
 
 function makeCategoryMap(categories) {
@@ -396,10 +400,20 @@ function matchFilter(entry, filter, catMap) {
     return dataMatch || uuidMatch;
   }
 
-  const rawStr =
-    field === 'ratingCategory'
-      ? allCatNamesStr(entry, catMap)   // searches ALL ancestors, not just direct parent
-      : String(entry[field] ?? '');
+  if (field === 'ratingCategory') {
+    const names = categoryNames(entry, catMap);
+    if (op === 'isEmpty') return names.length === 0;
+    if (op === 'isNotEmpty') return names.length > 0;
+    if (op === 'equals') {
+      return names.some((name) => testString(name, op, value, caseSensitive, useRegex));
+    }
+    if (op === 'notContains') {
+      return names.every((name) => testString(name, op, value, caseSensitive, useRegex));
+    }
+    return testString(names.join(' '), op, value, caseSensitive, useRegex);
+  }
+
+  const rawStr = String(entry[field] ?? '');
 
   if (op === 'isEmpty') return !rawStr.trim();
   if (op === 'isNotEmpty') return !!rawStr.trim();
