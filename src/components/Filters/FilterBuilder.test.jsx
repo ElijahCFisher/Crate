@@ -96,7 +96,7 @@ describe('category filters', () => {
       .toEqual(['nested-entry']);
   });
 
-  it('matches equals against an individual category name, not the full ancestor string', () => {
+  it('matches equals against only the direct category name', () => {
     const nestedCategories = [
       { uuid: 'root', restaurantName: 'Food', ratingCategory: '' },
       { uuid: 'breakfast', restaurantName: 'Breakfast', ratingCategory: 'root' },
@@ -111,13 +111,21 @@ describe('category filters', () => {
         categories: [],
         score: '8',
       },
+      {
+        uuid: 'direct-breakfast-entry',
+        restaurantName: 'Snooze',
+        specifier: 'Combo',
+        ratingCategory: 'breakfast',
+        categories: [],
+        score: '7',
+      },
     ];
     const categoryFilter = [
       { id: 1, field: 'ratingCategory', op: 'equals', value: 'Breakfast', connector: 'AND', caseSensitive: false, useRegex: false },
     ];
 
     expect(applyFilters(nestedEntries, categoryFilter, nestedCategories).map((entry) => entry.uuid))
-      .toEqual(['pancake-entry']);
+      .toEqual(['direct-breakfast-entry']);
   });
 });
 

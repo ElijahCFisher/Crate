@@ -301,6 +301,12 @@ function allCatNamesStr(entry, catMap) {
   return categoryNames(entry, catMap).join(' ');
 }
 
+function categoryNameForUuid(uuid, catMap) {
+  if (!uuid) return '';
+  const category = catMap.get(uuid);
+  return typeof category === 'string' ? category : category?.restaurantName || '';
+}
+
 function categoryNames(entry, catMap) {
   const names = [];
   const seenUuids = new Set();
@@ -405,7 +411,7 @@ function matchFilter(entry, filter, catMap) {
     if (op === 'isEmpty') return names.length === 0;
     if (op === 'isNotEmpty') return names.length > 0;
     if (op === 'equals') {
-      return names.some((name) => testString(name, op, value, caseSensitive, useRegex));
+      return testString(categoryNameForUuid(entry.ratingCategory, catMap), op, value, caseSensitive, useRegex);
     }
     if (op === 'notContains') {
       return names.every((name) => testString(name, op, value, caseSensitive, useRegex));
