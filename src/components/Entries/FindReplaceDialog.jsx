@@ -18,6 +18,7 @@ import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ConvertScalePanel from './ConvertScalePanel';
+import { makeDefaultFilter } from '../Filters/FilterBuilder';
 import {
   LABEL_RESTAURANT, LABEL_FOOD_NAME, LABEL_LOCATION, LABEL_NOTES,
 } from '../../constants/fieldLabels';
@@ -55,6 +56,9 @@ function replaceInString(str, find, replace, caseSensitive, useRegex) {
 
 export default function FindReplaceDialog({ open, onClose, foodEntries, categories = [], onReplaceAll }) {
   const [mode, setMode] = useState('replace');
+  const [convertFilters, setConvertFilters] = useState(() => [makeDefaultFilter()]);
+  const [convertFilterLogic, setConvertFilterLogic] = useState('');
+  const [convertToUuid, setConvertToUuid] = useState('');
   const [convertChanges, setConvertChanges] = useState([]);
   const [lastConvertCount, setLastConvertCount] = useState(null);
   const [findValue, setFindValue] = useState('');
@@ -116,6 +120,12 @@ export default function FindReplaceDialog({ open, onClose, foodEntries, categori
           <ConvertScalePanel
             foodEntries={foodEntries}
             categories={categories}
+            filters={convertFilters}
+            filterLogic={convertFilterLogic}
+            toUuid={convertToUuid}
+            onFiltersChange={setConvertFilters}
+            onFilterLogicChange={setConvertFilterLogic}
+            onToUuidChange={setConvertToUuid}
             onPreviewChange={handleConvertPreview}
             onDirty={handleConvertDirty}
             resultCount={lastConvertCount}

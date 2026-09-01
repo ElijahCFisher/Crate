@@ -71,6 +71,32 @@ describe('filter OR groups', () => {
   });
 });
 
+describe('category filters', () => {
+  it('matches ancestor category names from the live category tree when the entry cache is empty', () => {
+    const nestedCategories = [
+      { uuid: 'root', restaurantName: 'Food', ratingCategory: '' },
+      { uuid: 'savory', restaurantName: 'Savory', ratingCategory: 'root' },
+      { uuid: 'pizza', restaurantName: 'Pizza', ratingCategory: 'savory' },
+    ];
+    const nestedEntries = [
+      {
+        uuid: 'nested-entry',
+        restaurantName: 'Blue Pan',
+        specifier: 'Slice',
+        ratingCategory: 'pizza',
+        categories: [],
+        score: '8',
+      },
+    ];
+    const categoryFilter = [
+      { id: 1, field: 'ratingCategory', op: 'contains', value: 'Savory', connector: 'AND', caseSensitive: false, useRegex: false },
+    ];
+
+    expect(applyFilters(nestedEntries, categoryFilter, nestedCategories).map((entry) => entry.uuid))
+      .toEqual(['nested-entry']);
+  });
+});
+
 describe('rating filters', () => {
   const ratingFilter = (op, value) => ([
     { id: 1, field: 'score', op, value, connector: 'AND', caseSensitive: false, useRegex: false },

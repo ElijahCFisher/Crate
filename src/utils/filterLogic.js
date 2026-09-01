@@ -298,15 +298,37 @@ export function applyFilters(entries, filters, categories, logic = '') {
  * including the direct parent. Uses entry.categories (precomputed ancestor UUID list).
  */
 function allCatNamesStr(entry, catMap) {
-  // entry.categories already contains the direct parent + all ancestors
-  const uuids = new Set([entry.ratingCategory, ...(Array.isArray(entry.categories) ? entry.categories : [])].filter(Boolean));
-  return Array.from(uuids).map((uuid) => catMap.get(uuid) || '').filter(Boolean).join(' ');
+  const names = [];
+  const seenUuids = new Set();
+
+  function addName(category) {
+    const name = typeof category === 'string' ? category : category?.restaurantName;
+    if (name) names.push(name);
+  }
+
+  function addCategoryPath(uuid) {
+    let current = uuid;
+    while (current && !seenUuids.has(current)) {
+      seenUuids.add(current);
+      const category = catMap.get(current);
+      if (!category) break;
+      addName(category);
+      current = typeof category === 'string' ? '' : category.ratingCategory;
+    }
+  }
+
+  addCategoryPath(entry.ratingCategory);
+  for (const uuid of Array.isArray(entry.categories) ? entry.categories : []) {
+    addCategoryPath(uuid);
+  }
+
+  return names.join(' ');
 }
 
 function makeCategoryMap(categories) {
   return categories instanceof Map
     ? categories
-    : new Map(categories.map((c) => [c.uuid, c.restaurantName]));
+    : new Map(categories.map((c) => [c.uuid, c]));
 }
 
 function matchFilter(entry, filter, catMap) {
