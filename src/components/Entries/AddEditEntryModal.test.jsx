@@ -218,6 +218,83 @@ describe('applyTextToForm', () => {
     expect(next).toMatchObject({ restaurantName: 'Zorba', location: 'Denver' });
   });
 
+  it('takes the date off a date line, for the rating and any new one under it', () => {
+    const form = filledForm();
+    const lines = baselineFor(form);
+    const text = `${lines.map((l) => l.text).join('\n')}\nFries 5\n9/1/2025`;
+
+    const { form: next } = applyTextToForm(form, text, categories, lines);
+    expect(next.dateRated).toBe('2025-09-01');
+    expect(next.dateRatedMs).toBe(new Date(2025, 8, 1).getTime());
+    expect(next.additionalRatings[0]).toMatchObject({
+      specifier: 'Fries',
+      dateRated: '2025-09-01',
+      dateRatedMs: new Date(2025, 8, 1).getTime(),
+    });
+  });
+
+  it('leaves the date alone when the text names none', () => {
+    const form = filledForm();
+    const lines = baselineFor(form);
+    const text = `${lines.map((l) => l.text).join('\n')}\nFries 5`;
+
+    const { form: next } = applyTextToForm(form, text, categories, lines);
+    expect(next.dateRated).toBe('2026-01-01');
+    expect(next.additionalRatings[0].dateRated).toBe('2026-01-01');
+  });
+
+  it('does not invent a rating when a rating has no score yet', () => {
+    // An unscored rating used to render a line with no number in it, which
+    // read back as the block's location: it stole everyone else's location,
+    // split the block, and the next render showed the restaurant twice.
+    const form = {
+      ...makeForm([follower(1, null, { linkedFields: [], specifier: 'Fries', score: '5' })]),
+      specifier: 'Omelet',
+      primaryRating: { ratingCategory: '', newCategoryName: null, score: '' },
+    };
+    const lines = baselineFor(form);
+    const text = lines.map((l) => l.text).join('\n');
+    expect(text).toBe('Guess\nOmelet ?\nFries 5\n1/1');
+
+    const { form: next } = applyTextToForm(form, text, categories, lines);
+    expect(next.additionalRatings).toHaveLength(1);
+    expect(next.additionalRatings[0].location).toBe('');
+    expect(next.additionalRatings[0].specifier).toBe('Fries');
+    expect(baselineFor(next).map((l) => l.text)).toEqual(lines.map((l) => l.text));
+  });
+
+  it('re-committing untouched text never invents a rating, whatever shape it is in', () => {
+    const shapes = { name: ["Zorba's", ''], loc: ['Denver', ''], food: ['Gyro', ''], score: ['8', ''], date: ['2026-01-01', '2026-09-01'] };
+    const keys = Object.keys(shapes);
+    const total = keys.reduce((n, k) => n * shapes[k].length, 1);
+
+    for (let i = 0; i < total; i++) {
+      let rest = i;
+      const pick = {};
+      for (const key of keys) {
+        pick[key] = shapes[key][rest % shapes[key].length];
+        rest = Math.floor(rest / shapes[key].length);
+      }
+      const form = {
+        ...makeForm([follower(1, null, {
+          linkedFields: [], restaurantName: pick.name, location: pick.loc,
+          specifier: 'Fries', score: '5', dateRated: pick.date,
+        })]),
+        restaurantName: pick.name,
+        location: pick.loc,
+        specifier: pick.food,
+        dateRated: pick.date,
+        primaryRating: { ratingCategory: '', newCategoryName: null, score: pick.score },
+      };
+      const lines = baselineFor(form);
+      const text = lines.map((l) => l.text).join('\n');
+      const { form: next } = applyTextToForm(form, text, categories, lines);
+
+      expect(next.additionalRatings).toHaveLength(1);
+      expect(baselineFor(next).map((l) => l.text)).toEqual(lines.map((l) => l.text));
+    }
+  });
+
   it('reports unparseable lines without dropping the good ones', () => {
     const form = filledForm();
     const lines = baselineFor(form);

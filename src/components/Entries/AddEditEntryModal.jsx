@@ -419,7 +419,11 @@ function entriesToForm(entries) {
 
 // ── Text mode ────────────────────────────────────────────────────────────────
 
-/** The fields text mode is responsible for; date, picture and identicals stay in the form. */
+/**
+ * The fields text mode overwrites every time; picture and identicals stay in
+ * the form. The date is handled apart from these because it's optional in the
+ * text — no date line means "leave it as it is", not "clear it".
+ */
 const TEXT_FIELDS = ['restaurantName', 'location', 'specifier', 'score', 'ratingCategory', 'additionalInfo'];
 
 function readRatingField(form, ratingId, field) {
@@ -442,6 +446,7 @@ export function formToRatings(form) {
       score: form.primaryRating.score || '',
       ratingCategory: form.primaryRating.ratingCategory || '',
       additionalInfo: form.additionalInfo || '',
+      dateRated: form.dateRated || '',
     },
     ...form.additionalRatings.map((r) => ({
       id: r.id,
@@ -451,6 +456,7 @@ export function formToRatings(form) {
       score: r.score || '',
       ratingCategory: r.ratingCategory || '',
       additionalInfo: r.additionalInfo || '',
+      dateRated: r.dateRated || '',
     })),
   ];
 }
@@ -466,13 +472,22 @@ export function formToRatings(form) {
  * followers, and giving a follower its own value unlinks that one field.
  */
 export function applyTextToForm(form, text, categories, baselineLines) {
-  const { ratings, errors, blocks } = parseText(text, categories);
+  const { ratings, errors, warnings, blocks } = parseText(text, categories);
   const currentTexts = String(text ?? '').split(/\r?\n/);
   const matched = alignLines(baselineLines.map((line) => line.text), currentTexts);
 
   let next = form;
   const idByLine = new Map();
   const pending = [];
+
+  /** A block with no date line leaves whatever date the rating already had. */
+  function applyDate(current, id, dateRated) {
+    if (!dateRated || readRatingField(current, id, 'dateRated') === dateRated) return current;
+    return applyLinkedChange(current, id, 'dateRated', {
+      dateRated,
+      dateRatedMs: dateInputToMs(dateRated),
+    });
+  }
 
   for (const parsed of ratings) {
     const baseIndex = matched[parsed.lineNumber - 1];
@@ -492,9 +507,10 @@ export function applyTextToForm(form, text, categories, baselineLines) {
         if (readRatingField(next, id, field) === values[field]) continue;
         next = applyLinkedChange(next, id, field, { [field]: values[field] });
       }
+      next = applyDate(next, id, parsed.dateRated);
       idByLine.set(parsed.lineNumber, id);
     } else {
-      pending.push({ values, lineNumber: parsed.lineNumber });
+      pending.push({ values, dateRated: parsed.dateRated, lineNumber: parsed.lineNumber });
     }
   }
 
@@ -512,6 +528,7 @@ export function applyTextToForm(form, text, categories, baselineLines) {
       if (readRatingField(next, 'primary', field) === first.values[field]) continue;
       next = applyLinkedChange(next, 'primary', field, { [field]: first.values[field] });
     }
+    next = applyDate(next, 'primary', first.dateRated);
     idByLine.set(first.lineNumber, 'primary');
   } else if (primaryIsBlank) {
     // Only a restaurant/location typed so far — still worth keeping.
@@ -521,15 +538,16 @@ export function applyTextToForm(form, text, categories, baselineLines) {
         if (readRatingField(next, 'primary', field) === header[field]) continue;
         next = applyLinkedChange(next, 'primary', field, { [field]: header[field] });
       }
+      next = applyDate(next, 'primary', header.dateRated);
     }
   }
 
   if (pending.length > 0) {
-    const additions = pending.map(({ values, lineNumber }) => {
+    const additions = pending.map(({ values, dateRated, lineNumber }) => {
       const rating = {
         ...makeAdditionalRating(values),
-        dateRated: form.dateRated,
-        dateRatedMs: form.dateRatedMs ?? null,
+        dateRated: dateRated || form.dateRated,
+        dateRatedMs: dateRated ? dateInputToMs(dateRated) : (form.dateRatedMs ?? null),
       };
       idByLine.set(lineNumber, rating.id);
       return rating;
@@ -542,7 +560,7 @@ export function applyTextToForm(form, text, categories, baselineLines) {
     id: idByLine.get(i + 1) ?? null,
   }));
 
-  return { form: next, errors, lines };
+  return { form: next, errors, warnings, lines };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -589,6 +607,7 @@ export default function AddEditEntryModal({
   const [mode, setMode] = useState('form');
   const [text, setText] = useState('');
   const [textErrors, setTextErrors] = useState([]);
+  const [textWarnings, setTextWarnings] = useState([]);
   const textRef = useRef('');
   const textBaselineRef = useRef([]);
   const textDirtyRef = useRef(false);
@@ -603,6 +622,7 @@ export default function AddEditEntryModal({
       setLastUnlink(null);
       setMode('form');
       setTextErrors([]);
+      setTextWarnings([]);
       textDirtyRef.current = false;
       setFormKey((k) => k + 1);
       if (!entry && initialEntries && initialEntries.length > 0) {
@@ -861,6 +881,7 @@ export default function AddEditEntryModal({
     textDirtyRef.current = false;
     setText(rendered);
     setTextErrors([]);
+    setTextWarnings([]);
     setMode('text');
   }
 
@@ -874,6 +895,7 @@ export default function AddEditEntryModal({
     textBaselineRef.current = result.lines;
     textDirtyRef.current = false;
     setTextErrors(result.errors);
+    setTextWarnings(result.warnings);
     setForm(result.form);
     return result.form;
   }
@@ -901,18 +923,33 @@ export default function AddEditEntryModal({
           spellCheck={false}
           autoComplete="off"
           InputProps={{ sx: { fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: 1.6 } }}
-          placeholder={"Zorba's\nDenver\nGyro 8 greek really tender\n  Fries 5 too salty"}
+          placeholder={"Zorba's\nDenver\nGyro 8 greek really tender\n  Fries 5 too salty\n9/1"}
         />
         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
           Restaurant, then location, then one rating per line:
           {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>food  score  category  notes</Box>.
           Indent a line to log it as part of the rating above it. A blank line starts a new restaurant.
-          Categories are only matched to ones you already have — never created.
+          {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>?</Box>
+          {' '}stands in for a score you haven't decided on yet.
+          Categories are only matched to ones you already have — never created; when a name is
+          used in more than one place, write
+          {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>breakfast &gt; egg</Box>
+          {' '}to say which. A line of its own holding nothing but a date —
+          {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>9/1</Box>{' '}(this year) or
+          {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>9/1/25</Box>{' '}—
+          dates every rating in that block.
         </Typography>
         {textErrors.length > 0 && (
           <Alert severity="warning" sx={{ mt: 1.5 }}>
             {textErrors.map((err) => (
               <div key={err.lineNumber}>Line {err.lineNumber}: {err.message}</div>
+            ))}
+          </Alert>
+        )}
+        {textWarnings.length > 0 && (
+          <Alert severity="info" sx={{ mt: 1.5 }}>
+            {textWarnings.map((warning) => (
+              <div key={warning.lineNumber}>Line {warning.lineNumber}: {warning.message}</div>
             ))}
           </Alert>
         )}
