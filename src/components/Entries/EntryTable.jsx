@@ -24,6 +24,7 @@ import FindReplaceIcon from '@mui/icons-material/FindReplace';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import FilterBar from '../Filters/FilterBar';
+import ResultsMenu from './ResultsMenu';
 import DriveImage from '../DriveImage';
 import ImageLightbox from '../ImageLightbox';
 import {
@@ -629,6 +630,7 @@ export default function EntryTable({
               }
             />
           )}
+          <ResultsMenu entries={sortedEntries} categories={categories} />
           {!readOnly && onOpenFindReplace && (
             <Tooltip title="Find & Replace (Ctrl+H)">
               <Button variant="outlined" startIcon={<FindReplaceIcon />} onClick={onOpenFindReplace} size="small">
