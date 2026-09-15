@@ -4,6 +4,8 @@ import Container from '@mui/material/Container';
 import LinearProgress from '@mui/material/LinearProgress';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { useDevicePreference, TAB_POSITION_KEY, TAB_POSITIONS } from '../../hooks/useDevicePreference';
 import Header from './Header';
 import EntryTable from '../Entries/EntryTable';
 import AddEditEntryModal from '../Entries/AddEditEntryModal';
@@ -83,6 +85,22 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
 
   // Tab
   const [tab, setTab] = useState('entries');
+  const wideScreen = useMediaQuery((theme) => theme.breakpoints.up('md'), { noSsr: true });
+  const [tabPosition] = useDevicePreference(TAB_POSITION_KEY, 'side', TAB_POSITIONS);
+  const sideTabs = wideScreen && tabPosition === 'side';
+  // Tabs needs its Tab children directly, so the same list serves both layouts.
+  const tabItems = [
+    <Tab key="entries" value="entries"
+      label={`Food Entries${foodEntries.length ? ` (${foodEntries.length})` : ''}`} />,
+    <Tab key="categories" value="categories"
+      label={`Categories${categories.length ? ` (${categories.length})` : ''}`} />,
+    <Tab key="bulkAdds" value="bulkAdds"
+      label={`Bulk Adds${bulkAdds.length ? ` (${bulkAdds.length})` : ''}`} />,
+    <Tab key="friends" value="friends"
+      label={`Friends${following.length ? ` (${following.length})` : ''}`} />,
+    <Tab key="notes" label="Notes" value="notes" />,
+    <Tab key="settings" label="Settings" value="settings" />,
+  ];
 
   // Modal state
   const [addEditOpen, setAddEditOpen] = useState(false);
@@ -387,34 +405,36 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
       {/* Non-blocking thin progress bar while fetching Drive data */}
       {loading && <LinearProgress sx={{ height: 2 }} />}
 
-      <Container maxWidth="xl" sx={{ py: 3, flex: 1 }}>
-        {/* Tab switcher */}
-        <Tabs
-          value={tab}
-          onChange={(_, v) => setTab(v)}
-          variant="scrollable"
-          scrollButtons="auto"
-          sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
-        >
-          <Tab
-            label={`Food Entries${foodEntries.length ? ` (${foodEntries.length})` : ''}`}
-            value="entries"
-          />
-          <Tab
-            label={`Categories${categories.length ? ` (${categories.length})` : ''}`}
-            value="categories"
-          />
-          <Tab
-            label={`Bulk Adds${bulkAdds.length ? ` (${bulkAdds.length})` : ''}`}
-            value="bulkAdds"
-          />
-          <Tab
-            label={`Friends${following.length ? ` (${following.length})` : ''}`}
-            value="friends"
-          />
-          <Tab label="Notes" value="notes" />
-          <Tab label="Settings" value="settings" />
-        </Tabs>
+      <Box sx={{ display: 'flex', flex: 1, minWidth: 0 }}>
+      {/* Tab switcher — down the side on wide screens, across the top otherwise */}
+      {sideTabs && (
+        <Box component="nav" sx={{ flexShrink: 0, borderRight: 1, borderColor: 'divider', pt: 3 }}>
+          <Tabs
+            orientation="vertical"
+            value={tab}
+            onChange={(_, v) => setTab(v)}
+            sx={{
+              position: 'sticky',
+              top: 16,
+              '& .MuiTab-root': { alignItems: 'flex-start', textAlign: 'left', minHeight: 44, px: 2.5 },
+            }}
+          >
+            {tabItems}
+          </Tabs>
+        </Box>
+      )}
+      <Container maxWidth="xl" sx={{ py: 3, flex: 1, minWidth: 0 }}>
+        {!sideTabs && (
+          <Tabs
+            value={tab}
+            onChange={(_, v) => setTab(v)}
+            variant="scrollable"
+            scrollButtons="auto"
+            sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
+          >
+            {tabItems}
+          </Tabs>
+        )}
 
         {tab === 'entries' && (
           <EntryTable
@@ -481,6 +501,7 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
           />
         )}
       </Container>
+      </Box>
 
       {/* Add / Edit entry modal */}
       <AddEditEntryModal
