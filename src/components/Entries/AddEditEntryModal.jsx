@@ -33,6 +33,7 @@ import ImageLightbox from '../ImageLightbox';
 import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
 import { evalAdditionalInfo, hasExpressions } from '../../utils/mathUtils';
 import { LINKABLE_FIELDS } from '../../utils/linkUtils';
+import { convertBetweenScales, roundToValidScore } from '../../utils/scaleUtils';
 import { parseText, generateTextLines, alignLines } from '../../utils/textModeUtils';
 import {
   buildRestaurantLocations, locationsForRestaurant, orderLocationSuggestions,
@@ -239,6 +240,45 @@ export function applyLinkedChange(form, sourceId, field, patch, { userEdit = tru
   }
 
   return next;
+}
+
+function readScoreAndCategory(form, id) {
+  if (id === 'primary') return { score: form.primaryRating.score, ratingCategory: form.primaryRating.ratingCategory };
+  const r = form.additionalRatings.find((x) => x.id === id);
+  return r ? { score: r.score, ratingCategory: r.ratingCategory } : null;
+}
+
+/**
+ * Move a rating to another category. A re-rating — the same food rated again
+ * under a different category — starts out with the original's score, which
+ * means something else on the new category's scale. So when its score is still
+ * that untouched copy, it becomes the original score converted to the new
+ * scale: a guess to adjust rather than a number to remember to fix.
+ */
+export function applyRatingCategory(form, ratingId, patch, categoriesMap) {
+  const next = applyLinkedChange(form, ratingId, 'ratingCategory', patch);
+  if (ratingId === 'primary' || !patch.ratingCategory || !categoriesMap) return next;
+
+  const rating = form.additionalRatings.find((r) => r.id === ratingId);
+  if (!rating?.isIdentical) return next;
+
+  const leaderId = rating.linkParentId
+    ?? (rating.groupId === 'primary'
+      ? 'primary'
+      : form.additionalRatings.find((r) => r.groupId === rating.groupId && !r.isIdentical)?.id);
+  const leader = leaderId != null ? readScoreAndCategory(form, leaderId) : null;
+  if (!leader || leader.score === '' || leader.score == null) return next;
+
+  const untouched = rating.score === '' || String(rating.score) === String(leader.score)
+    || (rating.linkedFields || []).includes('score');
+  if (!untouched) return next;
+
+  const converted = convertBetweenScales(leader.score, leader.ratingCategory || '', patch.ratingCategory, categoriesMap);
+  if (!Number.isFinite(converted)) return next;
+  const guess = String(roundToValidScore(converted));
+  if (guess === String(rating.score)) return next;
+  // Written as an edit, so the guess stops following the original's raw score.
+  return applyLinkedChange(next, ratingId, 'score', { score: guess });
 }
 
 function hasLinkedChildren(form, ownerId, field) {
@@ -615,6 +655,7 @@ export default function AddEditEntryModal({
     [...new Set(foodEntries.map((e) => e.location).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [foodEntries]);
   const restaurantLocations = useMemo(() => buildRestaurantLocations(foodEntries), [foodEntries]);
+  const categoriesMap = useMemo(() => new Map(categories.map((c) => [c.uuid, c])), [categories]);
 
   const [form, setForm] = useState(entryToForm(null));
   const [showAdvanced, setShowAdvanced] = useState(showAdvancedByDefault);
@@ -873,7 +914,7 @@ export default function AddEditEntryModal({
       const idx = parseInt(target.replace('additional-', ''), 10);
       const rating = f.additionalRatings[idx];
       if (!rating) return f;
-      return applyLinkedChange(f, rating.id, 'ratingCategory', patch);
+      return applyRatingCategory(f, rating.id, patch, categoriesMap);
     });
   }
 

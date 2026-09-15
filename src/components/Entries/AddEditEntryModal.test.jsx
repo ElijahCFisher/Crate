@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
-  applyLinkedChange, buildLinkPlan, applyTextToForm, formToRatings, cloneEntryToForm,
+  applyLinkedChange, buildLinkPlan, applyTextToForm, formToRatings, cloneEntryToForm, applyRatingCategory,
 } from './AddEditEntryModal';
 import { msToDateInput } from '../../utils/dateUtils';
+import { convertBetweenScales, roundToValidScore } from '../../utils/scaleUtils';
+import { generateTextLines } from '../../utils/textModeUtils';
+import { LINKABLE_FIELDS } from '../../utils/linkUtils';
 
 describe('cloneEntryToForm', () => {
   const source = {
@@ -37,8 +40,6 @@ describe('cloneEntryToForm', () => {
     expect(form.additionalRatings).toEqual([]);
   });
 });
-import { generateTextLines } from '../../utils/textModeUtils';
-import { LINKABLE_FIELDS } from '../../utils/linkUtils';
 
 /**
  * Form shape: the primary rating lives on the root (plus primaryRating for
@@ -337,5 +338,46 @@ describe('applyTextToForm', () => {
 
     const { errors } = applyTextToForm(form, text, categories, lines);
     expect(errors).toHaveLength(1);
+  });
+});
+
+describe('applyRatingCategory (re-rating score guess)', () => {
+  const cats = [
+    { uuid: 'food', restaurantName: 'Food', ratingCategory: '', score: null },
+    { uuid: 'main', restaurantName: 'Main', ratingCategory: 'food', score: '9' },
+    { uuid: 'side', restaurantName: 'Side', ratingCategory: 'food', score: '4' },
+  ];
+  const map = new Map(cats.map((c) => [c.uuid, c]));
+  const expected = String(roundToValidScore(convertBetweenScales('8', 'main', 'side', map)));
+
+  function formWithRerating(overrides = {}) {
+    const form = makeForm([follower(1, 'primary', {
+      groupId: 'primary', isIdentical: true, score: '8', ratingCategory: 'main', ...overrides,
+    })]);
+    return { ...form, primaryRating: { ratingCategory: 'main', newCategoryName: null, score: '8' } };
+  }
+
+  it('converts the copied score onto the new category\'s scale', () => {
+    expect(expected).not.toBe('8');
+    const next = applyRatingCategory(formWithRerating(), 1, { ratingCategory: 'side', newCategoryName: null }, map);
+    expect(next.additionalRatings[0]).toMatchObject({ ratingCategory: 'side', score: expected });
+    expect(next.additionalRatings[0].linkedFields).not.toContain('score');
+  });
+
+  it('leaves a score you already typed yourself', () => {
+    const form = formWithRerating({ score: '6', linkedFields: [] });
+    const next = applyRatingCategory(form, 1, { ratingCategory: 'side', newCategoryName: null }, map);
+    expect(next.additionalRatings[0].score).toBe('6');
+  });
+
+  it('only guesses for re-ratings, not separate ratings', () => {
+    const form = formWithRerating({ isIdentical: false, groupId: '1' });
+    const next = applyRatingCategory(form, 1, { ratingCategory: 'side', newCategoryName: null }, map);
+    expect(next.additionalRatings[0].score).toBe('8');
+  });
+
+  it('does not guess for a brand-new category with no scale yet', () => {
+    const next = applyRatingCategory(formWithRerating(), 1, { ratingCategory: '', newCategoryName: 'Snack' }, map);
+    expect(next.additionalRatings[0].score).toBe('8');
   });
 });
