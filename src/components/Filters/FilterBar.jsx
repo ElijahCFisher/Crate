@@ -20,6 +20,9 @@ export default function FilterBar({
   onFiltersChange,
   onFilterLogicChange,
   groupStatsByFilterId,
+  entries,
+  categories,
+  filterOptions,
 }) {
   const hasActiveFilter = filters.some((f) => f.value.trim() || ['isEmpty', 'isNotEmpty'].includes(f.op));
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -72,6 +75,9 @@ export default function FilterBar({
         onChange={onFiltersChange}
         onFilterLogicChange={onFilterLogicChange}
         groupStatsByFilterId={groupStatsByFilterId}
+        entries={entries}
+        categories={categories}
+        filterOptions={filterOptions}
       />
       <Box sx={{ mt: 0.75, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
         {hasActiveFilter && (

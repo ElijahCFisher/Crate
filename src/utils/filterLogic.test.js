@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   applyFilters,
+  countFilterSuggestions,
+  narrowFilterSuggestions,
   expandSearchTerm,
   parseFilterText,
   parseSearchVocabulary,
@@ -129,5 +131,39 @@ describe('copying and pasting filters', () => {
     expect(parseFilterText('Flavor contains "x"').error).toMatch(/field/);
     expect(parseFilterText('Location = Denver').error).toMatch(/quoted/);
     expect(parseFilterText('Location = "Denver" AND').error).toMatch(/ends/);
+  });
+});
+
+describe('filter value suggestions', () => {
+  const pool = [
+    { uuid: 'a', restaurantName: 'In-N-Out', specifier: 'Fries', location: 'Brighton' },
+    { uuid: 'b', restaurantName: 'In-N-Out', specifier: 'Cheeseburger', location: 'Brighton' },
+    { uuid: 'c', restaurantName: 'In-N-Out', specifier: 'Fries', location: '16th, Denver' },
+    { uuid: 'd', restaurantName: 'Wendys', specifier: 'Frosty', location: 'Denver' },
+  ];
+
+  it('suggests values left over after the other filters, most common first', () => {
+    const food = filter('specifier', 'contains', '');
+    const place = filter('restaurantName', 'contains', 'In-N-Out');
+    const counted = countFilterSuggestions(pool, [place, food], [], food.id);
+    expect(counted.map((s) => [s.value, s.count])).toEqual([['Fries', 2], ['Cheeseburger', 1]]);
+  });
+
+  it('offers each part of a location list as well as the whole', () => {
+    const place = filter('location', 'equals', '');
+    const values = countFilterSuggestions(pool, [place], [], place.id).map((s) => s.value);
+    expect(values).toEqual(expect.arrayContaining(['Denver', '16th', '16th, Denver', 'Brighton']));
+    expect(values.filter((v) => v === 'Denver')).toHaveLength(1);
+  });
+
+  it('suggests nothing for fields where a list would not help', () => {
+    const rating = filter('score', 'ratingEquals', '');
+    expect(countFilterSuggestions(pool, [rating], [], rating.id)).toEqual([]);
+  });
+
+  it('narrows as you type, leaving out what you already typed in full', () => {
+    const counted = [{ value: 'Fries', count: 2 }, { value: 'Frosty', count: 1 }, { value: 'Cheeseburger', count: 1 }];
+    expect(narrowFilterSuggestions(counted, 'fr').map((s) => s.value)).toEqual(['Fries', 'Frosty']);
+    expect(narrowFilterSuggestions(counted, 'fries').map((s) => s.value)).toEqual([]);
   });
 });

@@ -653,6 +653,9 @@ export default function EntryTable({
         onFiltersChange={handleFiltersChange}
         onFilterLogicChange={setFilterLogic}
         groupStatsByFilterId={groupStatsByFilterId}
+        entries={foodEntries}
+        categories={categories}
+        filterOptions={filterOptions}
       />
       <ScoreSummary summary={scoreSummary} baseLabel={baseCategoryName} />
 

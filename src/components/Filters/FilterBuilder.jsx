@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useDeferredValue } from 'react';
+import Autocomplete from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
 import IconButton from '@mui/material/IconButton';
@@ -16,6 +17,7 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import EditIcon from '@mui/icons-material/Edit';
 import {
   FIELDS, getOps, needsValue, makeDefaultFilter, buildDefaultFilterLogic,
+  countFilterSuggestions, narrowFilterSuggestions,
 } from '../../utils/filterLogic';
 
 // Pure filtering logic (applyFilters, describeFilter, etc.) lives in
@@ -33,9 +35,33 @@ export default function FilterBuilder({
   onChange,
   onFilterLogicChange,
   groupStatsByFilterId,
+  entries,          // optional: enables value suggestions
+  categories = [],
+  filterOptions,
 }) {
   const [draggingId, setDraggingId] = useState(null);
   const [showLogic, setShowLogic] = useState(false);
+
+  // Suggestions are only worked out for the value box that has focus, and only
+  // recounted when the *other* filters change — typing just narrows the list.
+  const [focusedId, setFocusedId] = useState(null);
+  const focused = filters.find((f) => f.id === focusedId);
+  const othersKey = JSON.stringify(
+    filters.filter((f) => f.id !== focusedId).map((f) => [f.field, f.op, f.value, f.connector, f.caseSensitive, f.useRegex])
+  );
+  const deferredOthersKey = useDeferredValue(othersKey);
+  const counted = useMemo(
+    () => (entries && focused && !focused.useRegex
+      ? countFilterSuggestions(entries, filters, categories, focusedId, filterOptions)
+      : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [entries, categories, filterOptions, focusedId, focused?.field, focused?.useRegex, deferredOthersKey]
+  );
+  const typed = useDeferredValue(focused?.value ?? '');
+  const suggestions = useMemo(
+    () => narrowFilterSuggestions(counted, typed).map((s) => s.value),
+    [counted, typed]
+  );
 
   function addFilter() {
     onChange([...filters, makeDefaultFilter()]);
@@ -170,13 +196,30 @@ export default function FilterBuilder({
             />
           )}
           {needsValue(f) && f.field !== 'score' && f.field !== 'dateRated' && (
-            <TextField
-              value={f.value}
-              onChange={(e) => update(f.id, { value: e.target.value })}
+            <Autocomplete
+              freeSolo
+              disableClearable
               size="small"
-              placeholder={f.useRegex ? 'regex…' : 'value…'}
+              options={f.id === focusedId ? suggestions : []}
+              filterOptions={(options) => options}
+              inputValue={f.value}
+              onInputChange={(e, value, reason) => {
+                // A 'reset' with no event is Autocomplete syncing itself after a
+                // re-render, not you picking or typing anything.
+                if (reason === 'reset' && !e) return;
+                if (value !== f.value) update(f.id, { value });
+              }}
+              onFocus={() => setFocusedId(f.id)}
+              onBlur={() => setFocusedId((id) => (id === f.id ? null : id))}
+              slotProps={{ popper: { sx: { minWidth: 260 } } }}
               sx={{ width: 160 }}
-              error={f.useRegex && !isValidRegex(f.value)}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  placeholder={f.useRegex ? 'regex…' : 'value…'}
+                  error={f.useRegex && !isValidRegex(f.value)}
+                />
+              )}
             />
           )}
           {/* Case-sensitive toggle */}

@@ -687,3 +687,59 @@ function testString(haystack, op, needle, caseSensitive, useRegex) {
   if (op === 'notContains') return !h.includes(n);
   return true;
 }
+
+// ── Value suggestions ─────────────────────────────────────────────────────────
+
+const SUGGESTIBLE_FIELDS = new Set(['any', 'restaurantName', 'specifier', 'location', 'additionalInfo', 'ratingCategory']);
+
+function suggestionValues(entry, field, catMap) {
+  if (field === 'ratingCategory') return categoryNames(entry, catMap);
+  if (field === 'any') {
+    return [entry.restaurantName, entry.specifier, entry.location, ...categoryNames(entry, catMap)];
+  }
+  const value = String(entry[field] ?? '').trim();
+  if (field === 'location' && value.includes(',')) return [value, ...locationParts(value).slice(1)];
+  return [value];
+}
+
+/**
+ * What's worth typing into a filter: the values of its field among the entries
+ * every *other* filter still lets through, most common first. So with
+ * Restaurant contains "In-N-Out" set, a Food Name filter suggests In-N-Out's
+ * foods rather than every food ever rated.
+ *
+ * Counting is the expensive part and doesn't depend on what's typed, so it's
+ * split out: build once per filter set, then narrow as you type.
+ */
+export function countFilterSuggestions(entries, filters, categories, filterId, options = {}) {
+  const target = filters.find((f) => f.id === filterId);
+  if (!target || !SUGGESTIBLE_FIELDS.has(target.field)) return [];
+  const others = filters.filter((f) => f.id !== filterId);
+  // Custom logic names the filter being edited, so it can't apply without it;
+  // the others' plain AND/OR chain is the closest honest stand-in.
+  const pool = applyFilters(entries, others, categories, '', options);
+  const catMap = makeCategoryMap(categories);
+
+  const counts = new Map(); // lowercased → { value, count }
+  for (const entry of pool) {
+    const seen = new Set();
+    for (const raw of suggestionValues(entry, target.field, catMap)) {
+      const value = String(raw ?? '').trim();
+      const key = value.toLowerCase();
+      if (!value || seen.has(key)) continue;
+      seen.add(key);
+      const hit = counts.get(key);
+      if (hit) hit.count++;
+      else counts.set(key, { value, count: 1 });
+    }
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+export function narrowFilterSuggestions(counted, typed, limit = 30) {
+  const needle = String(typed ?? '').trim().toLowerCase();
+  const matches = needle
+    ? counted.filter((s) => s.value.toLowerCase().includes(needle) && s.value.toLowerCase() !== needle)
+    : counted;
+  return matches.slice(0, limit);
+}
