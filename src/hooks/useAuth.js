@@ -158,14 +158,22 @@ export function useAuth() {
   }, [needsConsentReauth, loginNormal, loginWithConsent]);
 
   const signOut = useCallback(async () => {
+    let serverError = null;
     try {
       await workerFetch('/logout', { method: 'POST' });
-    } finally {
-      clearGoogleAccessToken();
-      clearPhotoCache();
-      setIsAuthenticated(false);
-      setUserProfile(null);
+    } catch (err) {
+      serverError = err;
     }
+    clearGoogleAccessToken();
+    clearPhotoCache();
+    setIsAuthenticated(false);
+    setUserProfile(null);
+    // The session cookie is HttpOnly, so only the Worker can end it. If that
+    // call failed, this device is signed out but the next reload's silent
+    // session check would sign straight back in — say so rather than pretend.
+    setAuthError(serverError
+      ? `Signed out here, but the server session couldn't be ended (${serverError.message}). Reloading may sign you back in.`
+      : null);
   }, []);
 
   return { isAuthenticated, isSilentTrying, isSigningIn, authError, signIn, signOut, userProfile, needsConsentReauth };

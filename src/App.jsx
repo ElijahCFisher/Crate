@@ -12,5 +12,19 @@ export default function App() {
     auth.signIn();
   }
 
-  return <AppLayout auth={auth} data={data} onReauthenticate={handleReauthenticate} />;
+  // Local data goes first: auth flipping to signed-out makes useData fall back
+  // to whatever cache is left, and there shouldn't be any.
+  async function handleSignOut() {
+    data.clearLocalData();
+    await auth.signOut();
+  }
+
+  return (
+    <AppLayout
+      auth={auth}
+      data={data}
+      onReauthenticate={handleReauthenticate}
+      onSignOut={handleSignOut}
+    />
+  );
 }

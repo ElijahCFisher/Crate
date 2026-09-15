@@ -53,6 +53,22 @@ function loadWal() {
 function saveWal(ops) {
   try { localStorage.setItem(WAL_KEY, JSON.stringify(ops)); } catch {}
 }
+/** Every key this hook (and the table's saved filters) keeps in localStorage. */
+const LOCAL_DATA_PREFIX = 'food_ratings_';
+export function clearLocalDataStorage() {
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(LOCAL_DATA_PREFIX)) keys.push(key);
+    }
+    for (const key of keys) localStorage.removeItem(key);
+  } catch {}
+}
+/** How many local changes haven't reached Drive — what signing out would throw away. */
+export function countUnsyncedChanges() {
+  return Math.max(loadQueue().length, loadWal().length);
+}
 function isNetworkError(err) {
   return err instanceof TypeError && err.message.toLowerCase().includes('fetch');
 }
@@ -115,6 +131,8 @@ export function useData(isAuthenticated) {
       setChangelog(cached ? [...cached.changelog] : []);
       setCombinedFileId(null);
       setChangelogFileId(null);
+      setFolderId(null);
+      setPicturesFolderId(null);
       combinedFileIdRef.current = null;
       changelogFileIdRef.current = null;
       return;
@@ -849,8 +867,24 @@ export function useData(isAuthenticated) {
   const categories  = Array.from(combined.values()).filter((e) => e.entryType === 'category');
   const foodEntries = Array.from(combined.values()).filter((e) => e.entryType === 'food');
 
+  /**
+   * Forget everything this device knows: the cached ratings, the offline queue
+   * and write-ahead log, and what's on screen. Signing out used to fall straight
+   * back to the cache — which exists to show your data *before* signing in — so
+   * it looked like nothing happened.
+   */
+  const clearLocalData = useCallback(() => {
+    initCounterRef.current++; // any init() still in flight must not repopulate
+    clearLocalDataStorage();
+    setCombined(new Map());
+    setChangelog([]);
+    setPendingCount(0);
+    setSyncError(null);
+  }, []);
+
   return {
     combined, changelog, categories, foodEntries,
+    clearLocalData,
     fileId: combinedFileId, folderId, picturesFolderId, loading, syncing, syncError, setSyncError,
     isOffline, pendingCount,
     addEntry, addEntryGroups, addEntriesWithLinks, addCategory, modifyEntry, deleteEntry,

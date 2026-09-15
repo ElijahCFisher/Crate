@@ -18,7 +18,13 @@ import FindReplaceDialog from '../Entries/FindReplaceDialog';
 import NotesPanel from '../Notes/NotesPanel';
 import Snackbar from '@mui/material/Snackbar';
 import Button from '@mui/material/Button';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogContentText from '@mui/material/DialogContentText';
+import DialogActions from '@mui/material/DialogActions';
 import { useSettings } from '../../hooks/useSettings';
+import { countUnsyncedChanges } from '../../hooks/useData';
 import { shareFile } from '../../services/driveService';
 import {
   LINKABLE_FIELDS, makeLinkKeyResolver, resolveLinkPlan, collectLinkedFollowers,
@@ -38,7 +44,7 @@ function sameUuidList(a, b) {
   return a.every((uuid, i) => uuid === b[i]);
 }
 
-export default function AppLayout({ auth, data, onReauthenticate }) {
+export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
   const {
     combined,
     foodEntries,
@@ -87,6 +93,15 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
 
   // Follow request from URL
   const [followRequester, setFollowRequester] = useState(null);
+
+  // Signing out wipes this device's copy, including anything not yet synced.
+  const [signOutUnsynced, setSignOutUnsynced] = useState(0);
+
+  function requestSignOut() {
+    const unsynced = countUnsyncedChanges();
+    if (unsynced > 0) setSignOutUnsynced(unsynced);
+    else onSignOut();
+  }
 
   // Grandfather existing sharedWith people into the Pictures folder
   useEffect(() => {
@@ -324,7 +339,7 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
         isSigningIn={auth.isSigningIn}
         authError={auth.authError}
         onSignIn={auth.signIn}
-        onSignOut={auth.signOut}
+        onSignOut={requestSignOut}
         syncing={syncing}
         syncError={syncError}
         onClearError={() => setSyncError(null)}
@@ -485,6 +500,31 @@ export default function AppLayout({ auth, data, onReauthenticate }) {
           </Button>
         }
       />
+
+      {/* Sign out with changes still waiting to sync */}
+      <Dialog open={signOutUnsynced > 0} onClose={() => setSignOutUnsynced(0)}>
+        <DialogTitle>Sign out and discard unsynced changes?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {signOutUnsynced} change{signOutUnsynced === 1 ? " hasn't" : "s haven't"} reached
+            Google Drive yet. Signing out clears everything stored on this device, so
+            {signOutUnsynced === 1 ? ' it' : ' they'} would be lost. Staying signed in lets
+            {signOutUnsynced === 1 ? ' it' : ' them'} sync once you're back online.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSignOutUnsynced(0)} autoFocus>Stay signed in</Button>
+          <Button
+            color="error"
+            onClick={() => {
+              setSignOutUnsynced(0);
+              onSignOut();
+            }}
+          >
+            Sign out anyway
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Follow request from link */}
       <FollowRequestDialog
