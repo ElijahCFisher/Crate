@@ -8,6 +8,7 @@ const DEFAULT_SETTINGS = {
   sharedWith: [],        // [{ email, displayName }]
   showAdvancedByDefault: false,
   notes: '',
+  searchVocabulary: '',  // aliases and places, one rule per line — see filterLogic
 };
 
 export async function getOrCreateSettingsFile(folderId) {

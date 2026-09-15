@@ -4,6 +4,7 @@ import Typography from '@mui/material/Typography';
 import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Divider from '@mui/material/Divider';
+import TextField from '@mui/material/TextField';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import SettingsBrightnessIcon from '@mui/icons-material/SettingsBrightness';
@@ -11,7 +12,12 @@ import LightModeIcon from '@mui/icons-material/LightMode';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import { useThemeMode } from '../../theme';
 
-export default function SettingsPage({ showAdvancedByDefault, onUpdateShowAdvancedByDefault }) {
+export default function SettingsPage({
+  showAdvancedByDefault,
+  onUpdateShowAdvancedByDefault,
+  searchVocabulary = '',
+  onUpdateSearchVocabulary,
+}) {
   const { mode, setMode } = useThemeMode();
 
   return (
@@ -46,6 +52,32 @@ export default function SettingsPage({ showAdvancedByDefault, onUpdateShowAdvanc
         }
         label="Show advanced fields by default when adding entries"
       />
+
+      {onUpdateSearchVocabulary && (
+        <>
+          <Typography variant="subtitle2" color="text.secondary" gutterBottom sx={{ mt: 3 }}>
+            Search aliases &amp; places
+          </Typography>
+          <TextField
+            value={searchVocabulary}
+            onChange={(e) => onUpdateSearchVocabulary(e.target.value)}
+            multiline
+            minRows={4}
+            fullWidth
+            spellCheck={false}
+            placeholder={'CS = Colorado Springs\nDenver > CO > US\nColorado Springs > CO'}
+            InputProps={{ sx: { fontFamily: 'monospace', fontSize: '0.85rem' } }}
+            sx={{ maxWidth: 560 }}
+          />
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5, maxWidth: 560 }}>
+            One rule per line. <Box component="span" sx={{ fontFamily: 'monospace' }}>A = B</Box> makes
+            a search for either name find both.{' '}
+            <Box component="span" sx={{ fontFamily: 'monospace' }}>Denver &gt; CO &gt; US</Box> says
+            Denver is in CO, which is in US — so a Location or Any-field filter for CO also finds
+            Denver. Regex filters are never widened.
+          </Typography>
+        </>
+      )}
     </Box>
   );
 }

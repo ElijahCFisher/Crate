@@ -8,12 +8,14 @@ export function useSettings(folderId) {
   const [sharedWith, setSharedWith] = useState([]);         // [{ email, displayName }]
   const [showAdvancedByDefault, setShowAdvancedByDefault] = useState(false);
   const [notes, setNotes] = useState('');
+  const [searchVocabulary, setSearchVocabulary] = useState('');
   const [fileId, setFileId] = useState(null);
 
   const fileIdRef = useRef(null);
   // Single ref tracking the authoritative settings state, used when writing
   // to ensure we never lose fields that were updated in a sibling callback.
-  const stateRef = useRef({ bulkAdds: [], following: [], requestedToFollow: [], sharedWith: [], showAdvancedByDefault: false, notes: '' });
+  const stateRef = useRef({ bulkAdds: [], following: [], requestedToFollow: [], sharedWith: [], showAdvancedByDefault: false, notes: '', searchVocabulary: '' });
+  const vocabularyDebounceRef = useRef(null);
   // Per-field refs so callbacks can read current values without stale closures.
   const followingRef = useRef([]);
   const requestedRef = useRef([]);
@@ -27,7 +29,7 @@ export function useSettings(folderId) {
     if (!folderId) {
       setFileId(null);
       fileIdRef.current = null;
-      const empty = { bulkAdds: [], following: [], requestedToFollow: [], sharedWith: [], showAdvancedByDefault: false, notes: '' };
+      const empty = { bulkAdds: [], following: [], requestedToFollow: [], sharedWith: [], showAdvancedByDefault: false, notes: '', searchVocabulary: '' };
       stateRef.current = empty;
       setBulkAdds([]);
       setFollowing([]);
@@ -35,6 +37,7 @@ export function useSettings(folderId) {
       setSharedWith([]);
       setShowAdvancedByDefault(false);
       setNotes('');
+      setSearchVocabulary('');
       return;
     }
     let cancelled = false;
@@ -53,6 +56,7 @@ export function useSettings(folderId) {
           sharedWith: settings.sharedWith || [],
           showAdvancedByDefault: settings.showAdvancedByDefault ?? false,
           notes: settings.notes || '',
+          searchVocabulary: settings.searchVocabulary || '',
         };
         stateRef.current = s;
         followingRef.current = s.following;
@@ -63,6 +67,7 @@ export function useSettings(folderId) {
         setSharedWith(s.sharedWith);
         setShowAdvancedByDefault(s.showAdvancedByDefault);
         setNotes(s.notes);
+        setSearchVocabulary(s.searchVocabulary);
       } catch (err) {
         console.error('Settings load failed:', err);
       }
@@ -189,8 +194,20 @@ export function useSettings(folderId) {
     }, 1000);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Typed a keystroke at a time like notes, so written the same debounced way.
+  const updateSearchVocabulary = useCallback((value) => {
+    setSearchVocabulary(value);
+    stateRef.current = { ...stateRef.current, searchVocabulary: value };
+    if (vocabularyDebounceRef.current) clearTimeout(vocabularyDebounceRef.current);
+    vocabularyDebounceRef.current = setTimeout(() => {
+      const id = fileIdRef.current;
+      if (id) settingsService.writeSettings(id, stateRef.current).catch(console.error);
+    }, 1000);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   return {
     fileId,
+    searchVocabulary, updateSearchVocabulary,
     bulkAdds, addBulkAdd, updateBulkAdd, setBulkAddsLocal,
     following, addToFollowing, removeFromFollowing, promoteToFollowing,
     requestedToFollow, addToRequestedToFollow, removeFromRequestedToFollow,

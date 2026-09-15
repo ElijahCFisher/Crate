@@ -42,6 +42,91 @@ export const RATING_OPS = [
   { value: 'isNotEmpty', label: 'is not empty' },
 ];
 
+// ── Search vocabulary: aliases and places ─────────────────────────────────────
+//
+// One rule per line, written in Settings:
+//
+//   CS = Colorado Springs          two names for the same thing
+//   Denver > CO > US               Denver is in CO, which is in US
+//   Colorado Springs = CS > CO     both at once
+//
+// A search for any name in an alias group also finds the others. A search for a
+// place (in Location or Any field) also finds everything declared inside it, so
+// Location = "CO" finds entries at "16th, Denver".
+
+function normalizeTerm(value) {
+  return String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** Parse the rules text into something `expandSearchTerm` can use quickly. */
+export function parseSearchVocabulary(text) {
+  const parent = new Map(); // union-find over normalized terms
+  const find = (t) => {
+    let root = t;
+    while (parent.get(root) !== root) root = parent.get(root);
+    parent.set(t, root);
+    return root;
+  };
+  const add = (t) => { if (!parent.has(t)) parent.set(t, t); return find(t); };
+  const union = (a, b) => { const ra = add(a); const rb = add(b); if (ra !== rb) parent.set(rb, ra); };
+
+  const containment = []; // [innerTerm, outerTerm] — resolved to groups after all unions
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const levels = line.split('>')
+      .map((level) => level.split('=').map(normalizeTerm).filter(Boolean))
+      .filter((names) => names.length > 0);
+    for (const names of levels) {
+      add(names[0]);
+      for (const name of names.slice(1)) union(names[0], name);
+    }
+    for (let i = 0; i + 1 < levels.length; i++) containment.push([levels[i][0], levels[i + 1][0]]);
+  }
+
+  const members = new Map(); // root → every name in the group
+  for (const term of parent.keys()) {
+    const root = find(term);
+    if (!members.has(root)) members.set(root, []);
+    members.get(root).push(term);
+  }
+  const children = new Map(); // root → roots declared directly inside it
+  for (const [inner, outer] of containment) {
+    const innerRoot = find(inner);
+    const outerRoot = find(outer);
+    if (innerRoot === outerRoot) continue;
+    if (!children.has(outerRoot)) children.set(outerRoot, new Set());
+    children.get(outerRoot).add(innerRoot);
+  }
+  return { find: (t) => (parent.has(t) ? find(t) : null), members, children };
+}
+
+const PLACE_FIELDS = new Set(['location', 'any']);
+
+/**
+ * The other names a search for `needle` in `field` should also find: its
+ * aliases, plus — for Location and Any field — everything inside it. Never
+ * includes the needle itself.
+ */
+export function expandSearchTerm(vocabulary, needle, field) {
+  if (!vocabulary) return [];
+  const key = normalizeTerm(needle);
+  const root = key ? vocabulary.find(key) : null;
+  if (!root) return [];
+
+  const roots = [root];
+  if (PLACE_FIELDS.has(field)) {
+    const seen = new Set(roots);
+    for (let i = 0; i < roots.length; i++) {
+      for (const child of vocabulary.children.get(roots[i]) || []) {
+        if (!seen.has(child)) { seen.add(child); roots.push(child); }
+      }
+    }
+  }
+  const terms = new Set();
+  for (const r of roots) for (const name of vocabulary.members.get(r) || []) terms.add(name);
+  terms.delete(key);
+  return [...terms];
+}
+
 export function getOps(field) {
   if (field === 'dateRated') return DATE_OPS;
   if (field === 'score') return RATING_OPS;
@@ -91,10 +176,10 @@ export function splitFiltersIntoOrGroups(filters) {
   return groups;
 }
 
-export function applyFilterGroup(entries, group, categories) {
+export function applyFilterGroup(entries, group, categories, { vocabulary = null } = {}) {
   if (!group.length) return entries;
   const catMap = makeCategoryMap(categories);
-  return entries.filter((entry) => group.every((filter) => matchFilter(entry, filter, catMap)));
+  return entries.filter((entry) => group.every((filter) => matchFilter(entry, filter, catMap, vocabulary)));
 }
 
 export function describeFilter(filter) {
@@ -216,14 +301,14 @@ function parseFilterLogic(logic, filters) {
   return { valid: true, ast: parsed.node, logic: normalized };
 }
 
-function evalFilterAstWithCatMap(ast, entry, filters, catMap) {
+function evalFilterAstWithCatMap(ast, entry, filters, catMap, vocabulary = null) {
   if (!ast) return true;
-  if (ast.type === 'AND') return evalFilterAstWithCatMap(ast.left, entry, filters, catMap) && evalFilterAstWithCatMap(ast.right, entry, filters, catMap);
-  if (ast.type === 'OR') return evalFilterAstWithCatMap(ast.left, entry, filters, catMap) || evalFilterAstWithCatMap(ast.right, entry, filters, catMap);
+  if (ast.type === 'AND') return evalFilterAstWithCatMap(ast.left, entry, filters, catMap, vocabulary) && evalFilterAstWithCatMap(ast.right, entry, filters, catMap, vocabulary);
+  if (ast.type === 'OR') return evalFilterAstWithCatMap(ast.left, entry, filters, catMap, vocabulary) || evalFilterAstWithCatMap(ast.right, entry, filters, catMap, vocabulary);
 
   const filter = filters.find((f) => f.id === ast.filterId);
   if (!filter || !isActiveFilter(filter)) return false;
-  return matchFilter(entry, filter, catMap);
+  return matchFilter(entry, filter, catMap, vocabulary);
 }
 
 function collectTopLevelOrGroups(ast) {
@@ -246,9 +331,9 @@ export function getFilterLogicState(filters, logic) {
   return parseFilterLogic(logic, filters);
 }
 
-export function applyFilterLogicGroup(entries, filters, categories, ast) {
+export function applyFilterLogicGroup(entries, filters, categories, ast, { vocabulary = null } = {}) {
   const catMap = makeCategoryMap(categories);
-  return entries.filter((entry) => evalFilterAstWithCatMap(ast, entry, filters, catMap));
+  return entries.filter((entry) => evalFilterAstWithCatMap(ast, entry, filters, catMap, vocabulary));
 }
 
 export function getFilterLogicGroups(filters, logic) {
@@ -264,6 +349,127 @@ export function getFilterLogicGroups(filters, logic) {
       lastFilterId: groupFilters[groupFilters.length - 1]?.id,
     };
   });
+}
+
+// ── Copying and pasting filters ───────────────────────────────────────────────
+//
+// The copied form is the same text Edit Logic shows —
+//   (Restaurant/Brand contains "Pizza Hut" OR Location = "Denver") AND Rating ≥ "8"
+// — plus a [case] / [regex] tag on any filter that has those switched on, since
+// the plain description can't carry them.
+
+function flagTag(filter) {
+  const flags = [filter.caseSensitive && 'case', filter.useRegex && 'regex'].filter(Boolean);
+  return flags.length ? ` [${flags.join(' ')}]` : '';
+}
+
+export function serializeFilters(filters, logic = '') {
+  let text = (logic || '').trim() || buildDefaultFilterLogic(filters);
+  for (const filter of getActiveFilters(filters)) {
+    const tag = flagTag(filter);
+    if (tag) text = text.split(describeFilter(filter)).join(describeFilter(filter) + tag);
+  }
+  return text;
+}
+
+/**
+ * Read copied filter text back into filter rows. A flat chain of ANDs and ORs
+ * becomes rows with those connectors; anything with parentheses keeps the rows
+ * plain and carries the grouping as custom logic, exactly like Edit Logic.
+ * Returns { filters, logic } or { error }.
+ */
+export function parseFilterText(text) {
+  const source = String(text ?? '').trim();
+  if (!source) return { error: 'Nothing to paste.' };
+
+  const fieldsByLength = [...FIELDS].sort((a, b) => b.label.length - a.label.length);
+  const tokens = [];
+  let i = 0;
+
+  const startsWithWord = (word) => {
+    const slice = source.slice(i, i + word.length);
+    if (slice.toUpperCase() !== word) return false;
+    const next = source[i + word.length];
+    return next === undefined || /[\s(]/.test(next);
+  };
+
+  while (i < source.length) {
+    if (/\s/.test(source[i])) { i++; continue; }
+    if (source[i] === '(' || source[i] === ')') { tokens.push({ type: source[i] }); i++; continue; }
+    if (startsWithWord('AND') || startsWithWord('OR')) {
+      const word = startsWithWord('AND') ? 'AND' : 'OR';
+      tokens.push({ type: word });
+      i += word.length;
+      continue;
+    }
+
+    const field = fieldsByLength.find((f) => source.slice(i, i + f.label.length).toLowerCase() === f.label.toLowerCase());
+    if (!field) return { error: `Expected a field name near "${source.slice(i, i + 30)}"` };
+    i += field.label.length;
+    while (/\s/.test(source[i] ?? '')) i++;
+
+    const ops = [...getOps(field.value)].sort((a, b) => b.label.length - a.label.length);
+    const op = ops.find((o) => source.slice(i, i + o.label.length).toLowerCase() === o.label.toLowerCase());
+    if (!op) return { error: `Expected an operator after "${field.label}"` };
+    i += op.label.length;
+
+    const filter = {
+      id: Date.now() + Math.random(),
+      field: field.value,
+      op: op.value,
+      value: '',
+      caseSensitive: false,
+      useRegex: false,
+      connector: 'AND',
+    };
+
+    if (needsValue(filter)) {
+      while (/\s/.test(source[i] ?? '')) i++;
+      if (source[i] !== '"') return { error: `Expected a quoted value after "${field.label} ${op.label}"` };
+      // The value runs to the quote that the text after it says is the end —
+      // a closing paren, AND/OR, a [flags] tag, or the end — so quotes inside
+      // a value survive.
+      const rest = source.slice(i + 1);
+      const close = /"(?=\s*(?:$|\)|\[|AND\b|OR\b))/i.exec(rest);
+      if (!close) return { error: `Missing the closing quote after "${field.label} ${op.label}"` };
+      filter.value = rest.slice(0, close.index);
+      i += 1 + close.index + 1;
+    }
+
+    const tag = /^\s*\[([a-z ]*)\]/i.exec(source.slice(i));
+    if (tag) {
+      const flags = tag[1].toLowerCase().split(/\s+/);
+      filter.caseSensitive = flags.includes('case');
+      filter.useRegex = flags.includes('regex');
+      i += tag[0].length;
+    }
+    tokens.push({ type: 'FILTER', filter });
+  }
+
+  const filters = tokens.filter((t) => t.type === 'FILTER').map((t) => t.filter);
+  if (filters.length === 0) return { error: 'No filters found in that text.' };
+
+  const grouped = tokens.some((t) => t.type === '(' || t.type === ')');
+  if (!grouped) {
+    let expectFilter = true;
+    for (const token of tokens) {
+      if (expectFilter !== (token.type === 'FILTER')) return { error: 'Filters and AND/OR must alternate.' };
+      expectFilter = !expectFilter;
+    }
+    if (expectFilter) return { error: 'The text ends with AND/OR.' };
+    tokens.forEach((token, idx) => {
+      if (token.type === 'FILTER' && idx > 0) token.filter.connector = tokens[idx - 1].type;
+    });
+    return { filters, logic: '' };
+  }
+
+  const logic = tokens.map((t) => (t.type === 'FILTER' ? describeFilter(t.filter) : t.type))
+    .join(' ')
+    .replace(/\( /g, '(')
+    .replace(/ \)/g, ')');
+  const state = parseFilterLogic(logic, filters);
+  if (!state.valid) return { error: state.error };
+  return { filters, logic };
 }
 
 export function remapFilterLogic(logic, oldFilters, nextFilters) {
@@ -283,14 +489,19 @@ export function remapFilterLogic(logic, oldFilters, nextFilters) {
 
 // ── Filter matching ───────────────────────────────────────────────────────────
 
-export function applyFilters(entries, filters, categories, logic = '') {
+/**
+ * `options.vocabulary` (from parseSearchVocabulary) widens text searches to
+ * aliases and, for places, to what's inside them.
+ */
+export function applyFilters(entries, filters, categories, logic = '', options = {}) {
   // Ignore filters whose value is empty and the op needs one
   const parsed = parseFilterLogic(logic, filters);
-  if (!parsed.valid) return applyFilters(entries, filters, categories);
+  if (!parsed.valid) return applyFilters(entries, filters, categories, '', options);
   if (!parsed.ast) return entries;
 
   const catMap = makeCategoryMap(categories);
-  return entries.filter((entry) => evalFilterAstWithCatMap(parsed.ast, entry, filters, catMap));
+  const vocabulary = options.vocabulary || null;
+  return entries.filter((entry) => evalFilterAstWithCatMap(parsed.ast, entry, filters, catMap, vocabulary));
 }
 
 /**
@@ -341,8 +552,10 @@ function makeCategoryMap(categories) {
     : new Map(categories.map((c) => [c.uuid, c]));
 }
 
-function matchFilter(entry, filter, catMap) {
+function matchFilter(entry, filter, catMap, vocabulary = null) {
   const { field, op, value, caseSensitive, useRegex } = filter;
+  // Regex is you saying exactly what you mean, so it's never widened.
+  const extras = useRegex ? [] : expandSearchTerm(vocabulary, value, field);
 
   // Date field: compare ms timestamps against a YYYY-MM-DD date input
   if (field === 'dateRated') {
@@ -396,7 +609,7 @@ function matchFilter(entry, filter, catMap) {
     // Check all normal fields first
     const dataStr = [entry.restaurantName, entry.specifier, entry.location, entry.additionalInfo,
       allCatNamesStr(entry, catMap), entry.score != null ? String(entry.score) : ''].join(' ');
-    const dataMatch = testString(dataStr, op, value, caseSensitive, useRegex);
+    const dataMatch = testText(dataStr, op, value, caseSensitive, useRegex, extras);
     // UUID: exact match only in normal mode, regex match in regex mode
     const uuid = String(entry.uuid ?? '');
     const uuidMatch = useRegex
@@ -411,12 +624,12 @@ function matchFilter(entry, filter, catMap) {
     if (op === 'isEmpty') return names.length === 0;
     if (op === 'isNotEmpty') return names.length > 0;
     if (op === 'equals') {
-      return testString(categoryNameForUuid(entry.ratingCategory, catMap), op, value, caseSensitive, useRegex);
+      return testText(categoryNameForUuid(entry.ratingCategory, catMap), op, value, caseSensitive, useRegex, extras);
     }
     if (op === 'notContains') {
-      return names.every((name) => testString(name, op, value, caseSensitive, useRegex));
+      return names.every((name) => testText(name, op, value, caseSensitive, useRegex, extras));
     }
-    return testString(names.join(' '), op, value, caseSensitive, useRegex);
+    return testText(names.join(' '), op, value, caseSensitive, useRegex, extras);
   }
 
   const rawStr = String(entry[field] ?? '');
@@ -424,7 +637,35 @@ function matchFilter(entry, filter, catMap) {
   if (op === 'isEmpty') return !rawStr.trim();
   if (op === 'isNotEmpty') return !!rawStr.trim();
 
-  return testString(rawStr, op, value, caseSensitive, useRegex);
+  // A location is usually a list, most specific first — "16th, Denver" — so
+  // Location = "Denver" means any one of its parts is Denver, not the whole.
+  if (field === 'location' && op === 'equals' && !useRegex) {
+    return locationParts(rawStr).some((part) => testText(part, op, value, caseSensitive, false, extras));
+  }
+
+  return testText(rawStr, op, value, caseSensitive, useRegex, extras);
+}
+
+function locationParts(location) {
+  const parts = location.split(',').map((part) => part.trim()).filter(Boolean);
+  return [location, ...parts];
+}
+
+/** testString, widened to the vocabulary's extra names (matched as whole words). */
+function testText(haystack, op, needle, caseSensitive, useRegex, extraTerms = []) {
+  if (useRegex || extraTerms.length === 0) return testString(haystack, op, needle, caseSensitive, useRegex);
+  const positiveOp = op === 'notContains' ? 'contains' : op;
+  const hit = testString(haystack, positiveOp, needle, caseSensitive, false)
+    || extraTerms.some((term) => matchesTerm(haystack, positiveOp, term));
+  return op === 'notContains' ? !hit : hit;
+}
+
+function matchesTerm(haystack, op, term) {
+  const h = normalizeTerm(haystack);
+  if (op === 'equals') return h === term;
+  // Whole words only: a short alias like "CS" must not turn up inside "Pecs".
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'u').test(h);
 }
 
 function testString(haystack, op, needle, caseSensitive, useRegex) {

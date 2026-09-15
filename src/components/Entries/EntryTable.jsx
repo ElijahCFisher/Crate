@@ -34,6 +34,7 @@ import {
   getActiveFilters,
   describeFilter,
   makeDefaultFilter,
+  parseSearchVocabulary,
   remapFilterLogic,
 } from '../Filters/FilterBuilder';
 import Switch from '@mui/material/Switch';
@@ -158,6 +159,7 @@ export default function EntryTable({
   onClone,
   onOpenCategory,
   onOpenFindReplace,
+  searchVocabulary = '',
   readOnly = false,
 }) {
   const [filters, setFilters] = useState(() => loadPrefs()?.filters || [makeDefaultFilter()]);
@@ -202,9 +204,15 @@ export default function EntryTable({
     [foodEntries]
   );
 
+  const vocabulary = useMemo(
+    () => (searchVocabulary.trim() ? parseSearchVocabulary(searchVocabulary) : null),
+    [searchVocabulary]
+  );
+  const filterOptions = useMemo(() => ({ vocabulary }), [vocabulary]);
+
   const searchedEntries = useMemo(
-    () => applyFilters(foodEntries, deferredFilters, categories, deferredFilterLogic),
-    [foodEntries, deferredFilters, categories, deferredFilterLogic]
+    () => applyFilters(foodEntries, deferredFilters, categories, deferredFilterLogic, filterOptions),
+    [foodEntries, deferredFilters, categories, deferredFilterLogic, filterOptions]
   );
 
   const logicState = useMemo(
@@ -217,7 +225,7 @@ export default function EntryTable({
     if (!hasActiveFilter) return { hasActiveFilter: false };
 
     const groups = getFilterLogicGroups(deferredFilters, deferredFilterLogic).map((group) => {
-      const entries = applyFilterLogicGroup(foodEntries, deferredFilters, categories, group.ast);
+      const entries = applyFilterLogicGroup(foodEntries, deferredFilters, categories, group.ast, filterOptions);
       return {
         lastFilterId: group.lastFilterId,
         stats: getScoreStats(entries, categoryFullMap),
@@ -229,7 +237,7 @@ export default function EntryTable({
       overall: getScoreStats(searchedEntries, categoryFullMap),
       groups,
     };
-  }, [deferredFilters, deferredFilterLogic, foodEntries, categories, searchedEntries, categoryFullMap]);
+  }, [deferredFilters, deferredFilterLogic, foodEntries, categories, searchedEntries, categoryFullMap, filterOptions]);
 
   const groupStatsByFilterId = useMemo(() => {
     const map = new Map();

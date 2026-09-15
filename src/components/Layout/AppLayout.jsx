@@ -78,6 +78,7 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     sharedWith, addToSharedWith,
     showAdvancedByDefault, updateShowAdvancedByDefault,
     notes, updateNotes,
+    searchVocabulary, updateSearchVocabulary,
   } = useSettings(folderId);
 
   // Tab
@@ -424,6 +425,7 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
             onEdit={openEdit}
             onClone={openClone}
             onOpenCategory={openCategory}
+            searchVocabulary={searchVocabulary}
             onDelete={(entry) => setDeleteDialogEntry(entry)}
             onOpenFindReplace={() => setFindReplaceOpen(true)}
           />
@@ -457,6 +459,8 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
           <SettingsPage
             showAdvancedByDefault={showAdvancedByDefault}
             onUpdateShowAdvancedByDefault={updateShowAdvancedByDefault}
+            searchVocabulary={searchVocabulary}
+            onUpdateSearchVocabulary={updateSearchVocabulary}
           />
         )}
 
