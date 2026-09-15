@@ -35,6 +35,9 @@ import { evalAdditionalInfo, hasExpressions } from '../../utils/mathUtils';
 import { LINKABLE_FIELDS } from '../../utils/linkUtils';
 import { parseText, generateTextLines, alignLines } from '../../utils/textModeUtils';
 import {
+  buildRestaurantLocations, locationsForRestaurant, orderLocationSuggestions,
+} from '../../utils/restaurantLocations';
+import {
   LABEL_RESTAURANT, LABEL_FOOD_NAME, LABEL_RATING, LABEL_CATEGORY,
   LABEL_LOCATION, LABEL_DATE, LABEL_ADDITIONAL_INFO, LABEL_PICTURE,
 } from '../../constants/fieldLabels';
@@ -611,6 +614,7 @@ export default function AddEditEntryModal({
   const locationSuggestions = useMemo(() =>
     [...new Set(foodEntries.map((e) => e.location).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [foodEntries]);
+  const restaurantLocations = useMemo(() => buildRestaurantLocations(foodEntries), [foodEntries]);
 
   const [form, setForm] = useState(entryToForm(null));
   const [showAdvanced, setShowAdvanced] = useState(showAdvancedByDefault);
@@ -1179,6 +1183,17 @@ export default function AddEditEntryModal({
 
   // ── Field render helpers ──────────────────────────────────────────────────
 
+  /**
+   * Once a restaurant is named, an empty location takes the one from your most
+   * recent visit there. Only when the location field is on screen — a guess
+   * nobody can see shouldn't get saved.
+   */
+  function autofillLocation(values, onChange, restaurantName = values.restaurantName) {
+    if (!(isEdit || showAdvanced) || String(values.location ?? '').trim()) return;
+    const [mostRecent] = locationsForRestaurant(restaurantLocations, restaurantName);
+    if (mostRecent) onChange('location', mostRecent);
+  }
+
   function renderSimpleSharedFields(values, onChange, autoFocusFirst = false, ownerId = 'primary') {
     return (
       <>
@@ -1191,6 +1206,10 @@ export default function AddEditEntryModal({
               highlightedSuggestionsRef.current.restaurantName = '';
               onChange('restaurantName', v);
             }}
+            onChange={(_, v, reason) => {
+              if (reason === 'selectOption' && typeof v === 'string') autofillLocation(values, onChange, v);
+            }}
+            onBlur={() => autofillLocation(values, onChange)}
             {...suggestionCommitProps('restaurantName', onChange)}
             renderInput={(params) => (
               <TextField {...params}
@@ -1226,7 +1245,7 @@ export default function AddEditEntryModal({
         <Grid item xs={12} sm={8}>
           <Autocomplete
             freeSolo
-            options={locationSuggestions}
+            options={orderLocationSuggestions(locationSuggestions, restaurantLocations, values.restaurantName)}
             inputValue={values.location}
             onInputChange={(_, v) => {
               highlightedSuggestionsRef.current.location = '';
