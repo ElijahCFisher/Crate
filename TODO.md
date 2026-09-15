@@ -5,37 +5,62 @@ first. (Shipped items live in the git log, not here.)
 
 ## Needs a decision first
 
-- **Percentage rating for brands.** What's the percentage of? Share of a brand's
-  ratings above some score? Its average as a percent of 10? Its rank against
-  other brands in the same category? Once that's pinned down it's a column or
-  stat on a restaurant/brand view, which doesn't exist yet either.
+- **Percentage rating for brands — "like their product line".** Most likely
+  meaning: how much of a brand's product line you've rated (e.g. 14 of Dutch
+  Bros' drinks). The hard part is knowing the whole line — there's no source for
+  it. The To Try list (below) can stand in: a brand's to-try items plus its rated
+  items make a known line to take a percentage of. Revisit once To Try exists.
 
 - **Score for brands that aren't rated enough / rate each result by its main
   filter.** E.g. McDonald's judged against fast food, not against everything.
-  Needs: (1) what "main filter" means per brand — probably its most common
-  category, or a category you assign to the brand; (2) a shrinkage rule so a
-  brand with 2 ratings doesn't outrank one with 40 (a Bayesian average toward the
-  category mean is the usual answer); (3) where it shows — a Brands tab? The
-  table's stats code (`getScoreStats` in `EntryTable.jsx`) and
-  `convertToBaseScore` are the starting points.
-
-- **Displayed ratings relative to Food.** The entries table already has a
-  **Show as Food** switch (it converts every score to the root category's scale —
-  your root is Food). Is that what you meant, or something more: making it the
-  default, applying it to averages/exports, or relative to a category other than
-  the root?
-
-- **"Bubble sort the last 100 entries to make sure they're in date order."** The
-  table always sorts on the fly, so this presumably means the stored order in
-  `food-ratings-data.csv` (or the changelog). Where does the out-of-order data
-  show up — the Drive file, the MCP server's results, bulk adds? A one-time
-  "sort stored rows by date" (a stable sort, not literally bubble sort) is easy
-  once we know which order matters.
-
-- **Food to try integration.** Integration with what — a list inside Crate
-  ("want to try" entries with no score), or an outside app/list?
+  Undecided what "main filter" should mean. Options when this comes back up: the
+  brand's most common category, or a category you assign per brand; plus a
+  shrinkage rule so a brand with 2 ratings doesn't outrank one with 40 (a
+  Bayesian average toward the category mean). Starting points: `getScoreStats`
+  in `EntryTable.jsx`, `convertToBaseScore`.
 
 ## Bigger features
+
+- **To Try tab.** Replaces a long hand-kept doc of places and foods to try. What
+  that doc shows the feature needs:
+  - **Items at different grains** — a restaurant ("Big Sky Burger"), a restaurant
+    plus specific dishes (a deli, "challah french toast"), a chain's menu items
+    (a long list of Dutch Bros drinks, McDonald's flavors), a grocery or frozen
+    brand, a food type with no restaurant ("Sonoran dog", "elote"), a recipe or
+    homemade idea, even an event (a food festival). So: restaurant/brand and food
+    both optional, at least one required, and a brand can hold many food items
+    checked off one at a time.
+  - **Grouped by place, then genre** — cities (Denver, Colorado Springs, Tucson,
+    NYC, LA, Japan…), sometimes a neighborhood or "10 min NE", then Coffee,
+    Burgers, Pizza, Dessert… Location should use the same place hierarchy as
+    search (`Denver > CO`), genre should be an existing category, and the list
+    should use the same filter bar. Chain and grocery items have no place.
+  - **Notes that are really fields** — who recommended it or where from ("#79 on
+    Yelp's top 100", "server says it's better than X"), who to go with (the doc
+    marks some with a letter prefix), hours ("closed Sun, Mon"), how to get it
+    (in person, DoorDash, Goldbelly for shipping), and links (Maps, a separate
+    spreadsheet for one city). Tags for people and "how to get it", free text
+    for the rest.
+  - **Tried states** — "had it, try more (curry)?", "what I doordashed wasn't
+    great", an item that already has a score written next to it. "Rate it" should
+    open Add Entry prefilled from the item (the Clone prefill already does this)
+    and mark the item tried, linked to the new rating; the item can stay open
+    for "try more".
+  - **Gone** — a "Limited Time Gone" section: items that can't be tried anymore,
+    kept for the record rather than deleted.
+  - **Duplicates** — the same place appears twice in different sections, with a
+    spelling variant too; adding one should warn about a close match.
+  - **Import** — typing ~300 lines back in by hand is the real barrier. A paste
+    importer in the spirit of text mode: a line ending in ":" is a section (place
+    or genre), "Name - notes" splits into name and notes, a leading prefix
+    becomes a tag, and a preview to fix up before saving.
+  - **Hooks elsewhere** — adding a rating that matches an open to-try item offers
+    to check it off; "try something new" suggestions draw from it.
+  - **Storage** — either a new Entry Type in the data CSV (gets sync, changelog
+    and conflict handling for free) or a list in `SettingsEtc.json` (simpler, but
+    that file is rewritten whole). The CSV is the safer choice.
+  - **Open question** — what the doc's "D" and "DD" prefixes mean (seen in the
+    Tucson and Colorado Springs sections) before they become tags.
 
 - **Suggested ratings to update** — a review queue of things that look wrong or
   unfinished:
