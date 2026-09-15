@@ -107,6 +107,21 @@ function entryToForm(entry) {
   };
 }
 
+/**
+ * A new entry that starts as a copy of an existing one — same place, food,
+ * category, score and notes — for rating the same thing again. It's a fresh
+ * rating, so it's dated today and leaves the old one's photo and identicals.
+ */
+export function cloneEntryToForm(source) {
+  return {
+    ...entryToForm(source),
+    dateRated: msToDateInput(Date.now()),
+    dateRatedMs: Date.now(),
+    picture: '',
+    identicalsText: '',
+  };
+}
+
 function formatIdenticalsForInput(identicals) {
   return (identicals || []).filter(Boolean).join('\n');
 }
@@ -570,9 +585,11 @@ export default function AddEditEntryModal({
   open,
   entry,
   initialEntries,
+  prefill,      // add mode only: an entry to start the new one from (Clone)
   categories,
   foodEntries = [],
   onSave,
+  onClone,      // edit mode only: (entry) => void, closes this and opens a clone
   onSaveGroups,
   onBulkSave,
   onAddCategory,
@@ -617,7 +634,9 @@ export default function AddEditEntryModal({
 
   useEffect(() => {
     if (open) {
-      setShowAdvanced(showAdvancedByDefault);
+      // A clone carries a category, which lives in the advanced fields in add
+      // mode — show them so what's being copied isn't hidden.
+      setShowAdvanced(showAdvancedByDefault || (!entry && !!prefill));
       setShowIdenticalsEditor(false);
       setLastUnlink(null);
       setMode('form');
@@ -627,11 +646,13 @@ export default function AddEditEntryModal({
       setFormKey((k) => k + 1);
       if (!entry && initialEntries && initialEntries.length > 0) {
         setForm(entriesToForm(initialEntries));
+      } else if (!entry && prefill) {
+        setForm(cloneEntryToForm(prefill));
       } else {
         setForm(entryToForm(entry));
       }
     }
-  }, [open, entry, initialEntries, showAdvancedByDefault]);
+  }, [open, entry, initialEntries, prefill, showAdvancedByDefault]);
 
   function setShared(field, value) {
     setForm((f) => applyLinkedChange(f, 'primary', field, { [field]: value }));
@@ -1375,7 +1396,7 @@ export default function AddEditEntryModal({
     <>
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <form onSubmit={handleSubmit}>
-        <DialogTitle>{isEdit ? 'Edit Entry' : isBulkEdit ? 'Bulk Add' : 'Add Entry'}</DialogTitle>
+        <DialogTitle>{isEdit ? 'Edit Entry' : isBulkEdit ? 'Bulk Add' : prefill ? 'Add Entry (cloned)' : 'Add Entry'}</DialogTitle>
         <DialogContent dividers>
           {saveError && <Alert severity="error" sx={{ mb: 2 }}>{saveError}</Alert>}
 
@@ -1602,6 +1623,18 @@ export default function AddEditEntryModal({
           </Box>
         </DialogContent>
         <DialogActions>
+          {isEdit && onClone && (
+            <Tooltip title="Start a new entry from this one (dated today)">
+              <Button
+                onClick={() => onClone(entry)}
+                disabled={loading}
+                startIcon={<ContentCopyIcon />}
+                sx={{ mr: 'auto' }}
+              >
+                Clone
+              </Button>
+            </Tooltip>
+          )}
           <Button onClick={onClose} disabled={loading}>Cancel</Button>
           <Button type="submit" variant="contained" disabled={loading}
             startIcon={loading ? <CircularProgress size={16} color="inherit" /> : null}>

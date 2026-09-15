@@ -1,7 +1,42 @@
 import { describe, it, expect } from 'vitest';
 import {
-  applyLinkedChange, buildLinkPlan, applyTextToForm, formToRatings,
+  applyLinkedChange, buildLinkPlan, applyTextToForm, formToRatings, cloneEntryToForm,
 } from './AddEditEntryModal';
+import { msToDateInput } from '../../utils/dateUtils';
+
+describe('cloneEntryToForm', () => {
+  const source = {
+    uuid: 'u-1',
+    restaurantName: "Zorba's",
+    specifier: 'Gyro',
+    location: 'Denver',
+    ratingCategory: 'c-greek',
+    score: 8,
+    additionalInfo: 'extra tzatziki',
+    dateRated: new Date(2025, 0, 2).getTime(),
+    picture: 'drive-file-id',
+    identicals: ['u-2'],
+  };
+
+  it('copies what you would rate again', () => {
+    const form = cloneEntryToForm(source);
+    expect(form).toMatchObject({
+      restaurantName: "Zorba's",
+      specifier: 'Gyro',
+      location: 'Denver',
+      additionalInfo: 'extra tzatziki',
+      primaryRating: { ratingCategory: 'c-greek', score: '8' },
+    });
+  });
+
+  it('is a fresh rating: dated today, without the old photo or identicals', () => {
+    const form = cloneEntryToForm(source);
+    expect(form.dateRated).toBe(msToDateInput(Date.now()));
+    expect(form.picture).toBe('');
+    expect(form.identicalsText).toBe('');
+    expect(form.additionalRatings).toEqual([]);
+  });
+});
 import { generateTextLines } from '../../utils/textModeUtils';
 import { LINKABLE_FIELDS } from '../../utils/linkUtils';
 

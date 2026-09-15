@@ -10,6 +10,7 @@ import AddEditEntryModal from '../Entries/AddEditEntryModal';
 import DeleteConfirmDialog from '../Entries/DeleteConfirmDialog';
 import ExportImportDialog from '../ExportImport/ExportImportDialog';
 import CategoriesPanel from '../Categories/CategoriesPanel';
+import CreateCategoryDialog from '../Categories/CreateCategoryDialog';
 import BulkAddsPanel from '../BulkAdds/BulkAddsPanel';
 import FriendsPanel from '../Friends/FriendsPanel';
 import FollowRequestDialog from '../Friends/FollowRequestDialog';
@@ -86,6 +87,9 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
   const [addEditOpen, setAddEditOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState(null);
   const [bulkAddEntries, setBulkAddEntries] = useState(null);
+  const [cloneSource, setCloneSource] = useState(null);
+  // A category opened from its chip in the entries table.
+  const [viewingCategory, setViewingCategory] = useState(null);
   const [deleteDialogEntry, setDeleteDialogEntry] = useState(null);
   const [exportImportOpen, setExportImportOpen] = useState(false);
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
@@ -158,18 +162,28 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
   function openAdd() {
     setEditingEntry(null);
     setBulkAddEntries(null);
+    setCloneSource(null);
     setAddEditOpen(true);
   }
 
   function openFromBulk(entries) {
     setEditingEntry(null);
     setBulkAddEntries(entries);
+    setCloneSource(null);
     setAddEditOpen(true);
   }
 
   function openEdit(entry) {
     setEditingEntry(entry);
     setBulkAddEntries(null);
+    setCloneSource(null);
+    setAddEditOpen(true);
+  }
+
+  function openClone(entry) {
+    setEditingEntry(null);
+    setBulkAddEntries(null);
+    setCloneSource(entry);
     setAddEditOpen(true);
   }
 
@@ -177,6 +191,26 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     setAddEditOpen(false);
     setEditingEntry(null);
     setBulkAddEntries(null);
+    setCloneSource(null);
+  }
+
+  function openCategory(uuid) {
+    const category = categories.find((c) => c.uuid === uuid);
+    if (category) setViewingCategory(category);
+  }
+
+  /** Same shape CategoriesPanel hands back, so the dialog can close on it. */
+  function handleViewingCategorySave(categoryData) {
+    if (!viewingCategory) return null;
+    handleEditCategory(viewingCategory, categoryData);
+    return {
+      ...viewingCategory,
+      restaurantName: categoryData.name,
+      ratingCategory: categoryData.ratingCategory,
+      score: categoryData.score,
+      dateRated: categoryData.dateRated,
+      additionalInfo: categoryData.additionalInfo || '',
+    };
   }
 
   /** Write the `linkedFields` maps a just-saved modal asked for. */
@@ -388,6 +422,8 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
             loading={loading}
             onAdd={openAdd}
             onEdit={openEdit}
+            onClone={openClone}
+            onOpenCategory={openCategory}
             onDelete={(entry) => setDeleteDialogEntry(entry)}
             onOpenFindReplace={() => setFindReplaceOpen(true)}
           />
@@ -447,15 +483,30 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
         open={addEditOpen}
         entry={editingEntry}
         initialEntries={bulkAddEntries}
+        prefill={cloneSource}
         categories={categories}
         foodEntries={foodEntries}
         onSave={handleSave}
+        onClone={openClone}
         onSaveGroups={!editingEntry && !bulkAddEntries ? handleSaveGroups : undefined}
         onBulkSave={bulkAddEntries ? handleBulkSave : undefined}
         onAddCategory={handleAddCategory}
         onClose={closeAddEdit}
         showAdvancedByDefault={showAdvancedByDefault}
         picturesFolderId={picturesFolderId}
+      />
+
+      {/* Category opened from a chip in the entries table */}
+      <CreateCategoryDialog
+        open={!!viewingCategory}
+        editEntry={viewingCategory}
+        initialName=""
+        categories={categories}
+        combined={combined}
+        onSave={handleViewingCategorySave}
+        onAddCategory={handleAddCategory}
+        onRebalance={applyRebalance}
+        onClose={() => setViewingCategory(null)}
       />
 
       {/* Delete confirm */}

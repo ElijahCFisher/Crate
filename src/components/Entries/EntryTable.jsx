@@ -19,6 +19,7 @@ import TextField from '@mui/material/TextField';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import FindReplaceIcon from '@mui/icons-material/FindReplace';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
@@ -154,6 +155,8 @@ export default function EntryTable({
   onAdd,
   onEdit,
   onDelete,
+  onClone,
+  onOpenCategory,
   onOpenFindReplace,
   readOnly = false,
 }) {
@@ -477,16 +480,28 @@ export default function EntryTable({
   // ── Row renderer ─────────────────────────────────────────────────────────
   // Used for both primary and secondary (expanded identical) rows.
 
+  /**
+   * Clicking anywhere on a row opens it for editing — except on something that
+   * has its own click (a button, the category chip, the photo), or when the
+   * click was the end of selecting text to copy.
+   */
+  function handleRowClick(e, entry) {
+    if (readOnly) return;
+    if (e.target.closest('button, a, input, img, [role="button"], .MuiChip-root')) return;
+    if (window.getSelection?.().toString()) return;
+    onEdit(entry);
+  }
+
   function renderRow(entry, isPrimary, primaryUuid, othersCount, isExpanded) {
     return (
       <TableRow
         key={entry.uuid}
         hover
-        sx={
-          !isPrimary
-            ? { bgcolor: 'action.hover', '& td': { borderBottom: 'none' } }
-            : undefined
-        }
+        onClick={(e) => handleRowClick(e, entry)}
+        sx={{
+          ...(!readOnly && { cursor: 'pointer' }),
+          ...(!isPrimary && { bgcolor: 'action.hover', '& td': { borderBottom: 'none' } }),
+        }}
       >
         {/* Expand/collapse toggle — only on primary rows that have identicals */}
         <TableCell sx={{ width: 36, p: 0, pl: 0.5 }}>
@@ -534,6 +549,7 @@ export default function EntryTable({
               size="small"
               variant="outlined"
               color="primary"
+              onClick={onOpenCategory ? () => onOpenCategory(entry.ratingCategory) : undefined}
             />
           ) : (
             <Typography variant="body2" color="text.disabled">—</Typography>
@@ -561,6 +577,13 @@ export default function EntryTable({
                 <EditIcon fontSize="small" />
               </IconButton>
             </Tooltip>
+            {onClone && (
+              <Tooltip title="Clone — new entry from this one">
+                <IconButton size="small" onClick={() => onClone(entry)}>
+                  <ContentCopyIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
             <Tooltip title="Delete">
               <IconButton size="small" onClick={() => onDelete(entry)} color="error">
                 <DeleteIcon fontSize="small" />
