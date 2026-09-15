@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  CATEGORY_FIELDS,
   applyFilters,
   countFilterSuggestions,
   narrowFilterSuggestions,
@@ -165,5 +166,43 @@ describe('filter value suggestions', () => {
     const counted = [{ value: 'Fries', count: 2 }, { value: 'Frosty', count: 1 }, { value: 'Cheeseburger', count: 1 }];
     expect(narrowFilterSuggestions(counted, 'fr').map((s) => s.value)).toEqual(['Fries', 'Frosty']);
     expect(narrowFilterSuggestions(counted, 'fries').map((s) => s.value)).toEqual([]);
+  });
+});
+
+describe('filtering categories', () => {
+  const cats = [
+    { uuid: 'food', restaurantName: 'Food', ratingCategory: '', score: null },
+    { uuid: 'breakfast', restaurantName: 'Breakfast', ratingCategory: 'food', score: '7' },
+    { uuid: 'b-egg', restaurantName: 'Egg', ratingCategory: 'breakfast', score: '8' },
+    { uuid: 'side', restaurantName: 'Side', ratingCategory: 'food', score: '5' },
+    { uuid: 's-egg', restaurantName: 'Egg', ratingCategory: 'side', score: '4' },
+  ];
+  const options = { fields: CATEGORY_FIELDS };
+
+  it('Parent contains finds everything anywhere underneath; Parent = only direct children', () => {
+    expect(ids(applyFilters(cats, [filter('ratingCategory', 'contains', 'Breakfast')], cats, '', options))).toEqual(['b-egg']);
+    expect(ids(applyFilters(cats, [filter('ratingCategory', 'contains', 'Food')], cats, '', options)))
+      .toEqual(['breakfast', 'b-egg', 'side', 's-egg']);
+    expect(ids(applyFilters(cats, [filter('ratingCategory', 'equals', 'Food')], cats, '', options)))
+      .toEqual(['breakfast', 'side']);
+  });
+
+  it('writes and reads logic in the category labels', () => {
+    const rows = [
+      filter('restaurantName', 'equals', 'Egg'),
+      filter('ratingCategory', 'equals', 'Side', { connector: 'OR' }),
+      filter('score', 'ratingGreater', '6'),
+    ];
+    const text = serializeFilters(rows, '', CATEGORY_FIELDS);
+    expect(text).toBe('Name = "Egg" OR Parent = "Side" AND Score > "6"');
+
+    const logic = '(Name = "Egg" OR Parent = "Side") AND Score > "6"';
+    const pasted = parseFilterText(logic, CATEGORY_FIELDS);
+    expect(pasted.error).toBeUndefined();
+    expect(ids(applyFilters(cats, pasted.filters, cats, pasted.logic, options))).toEqual(['b-egg']);
+  });
+
+  it('does not read entry labels as category ones', () => {
+    expect(parseFilterText('Restaurant/Brand contains "Egg"', CATEGORY_FIELDS).error).toMatch(/field/);
   });
 });

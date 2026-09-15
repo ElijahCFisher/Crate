@@ -15,6 +15,22 @@ export const FIELDS = [
   { value: 'uuid', label: 'UUID' },
 ];
 
+/**
+ * The same engine over categories. A category is stored as an entry: its name
+ * is restaurantName and its parent is ratingCategory, so those fields keep
+ * their keys and just get honest labels — and Parent contains "Food" finds
+ * everything anywhere under Food, same as Category does for entries.
+ */
+export const CATEGORY_FIELDS = [
+  { value: 'any', label: 'Any field' },
+  { value: 'restaurantName', label: 'Name' },
+  { value: 'ratingCategory', label: 'Parent' },
+  { value: 'score', label: 'Score' },
+  { value: 'additionalInfo', label: LABEL_NOTES },
+  { value: 'dateRated', label: LABEL_DATE },
+  { value: 'uuid', label: 'UUID' },
+];
+
 export const TEXT_OPS = [
   { value: 'contains', label: 'contains' },
   { value: 'equals', label: '=' },
@@ -149,12 +165,12 @@ export function getActiveFilters(filters) {
   return filters.filter(isActiveFilter);
 }
 
-export function buildDefaultFilterLogic(filters) {
+export function buildDefaultFilterLogic(filters, fields = FIELDS) {
   const parts = [];
   filters.forEach((filter) => {
     if (!isActiveFilter(filter)) return;
     if (parts.length > 0) parts.push(filter.connector || 'AND');
-    parts.push(describeFilter(filter));
+    parts.push(describeFilter(filter, fields));
   });
   return parts.join(' ');
 }
@@ -182,25 +198,30 @@ export function applyFilterGroup(entries, group, categories, { vocabulary = null
   return entries.filter((entry) => group.every((filter) => matchFilter(entry, filter, catMap, vocabulary)));
 }
 
-export function describeFilter(filter) {
-  const fieldLabel = FIELDS.find((field) => field.value === filter.field)?.label || filter.field;
+/**
+ * `fields` is the field list the filter rows offer — FIELDS for entries, or
+ * another list (CATEGORY_FIELDS) that names the same underlying fields
+ * differently. Everything that turns filters into text takes it.
+ */
+export function describeFilter(filter, fields = FIELDS) {
+  const fieldLabel = fields.find((field) => field.value === filter.field)?.label || filter.field;
   const allOps = [...TEXT_OPS, ...DATE_OPS, ...RATING_OPS];
   const opLabel = allOps.find((op) => op.value === filter.op)?.label || filter.op;
   const value = needsValue(filter) ? ` "${filter.value}"` : '';
   return `${fieldLabel} ${opLabel}${value}`;
 }
 
-export function describeFilterGroup(group) {
+export function describeFilterGroup(group, fields = FIELDS) {
   return group.map((filter, idx) => {
     const prefix = idx > 0 ? ' AND ' : '';
-    return `${prefix}${describeFilter(filter)}`;
+    return `${prefix}${describeFilter(filter, fields)}`;
   }).join('');
 }
 
-function tokenizeLogic(logic, filters) {
+function tokenizeLogic(logic, filters, fields = FIELDS) {
   const tokens = [];
   const operands = getActiveFilters(filters)
-    .map((filter) => ({ filter, text: describeFilter(filter) }))
+    .map((filter) => ({ filter, text: describeFilter(filter, fields) }))
     .sort((a, b) => b.text.length - a.text.length);
   let i = 0;
 
@@ -234,11 +255,11 @@ function tokenizeLogic(logic, filters) {
   return { tokens, error: null };
 }
 
-function parseFilterLogic(logic, filters) {
-  const normalized = (logic || buildDefaultFilterLogic(filters)).trim();
+function parseFilterLogic(logic, filters, fields = FIELDS) {
+  const normalized = (logic || buildDefaultFilterLogic(filters, fields)).trim();
   if (!normalized) return { valid: true, ast: null, logic: normalized };
 
-  const { tokens, error } = tokenizeLogic(normalized, filters);
+  const { tokens, error } = tokenizeLogic(normalized, filters, fields);
   if (error) return { valid: false, error, ast: null, logic: normalized };
 
   let pos = 0;
@@ -327,8 +348,8 @@ function collectFilterIds(ast, ids = new Set()) {
   return ids;
 }
 
-export function getFilterLogicState(filters, logic) {
-  return parseFilterLogic(logic, filters);
+export function getFilterLogicState(filters, logic, fields = FIELDS) {
+  return parseFilterLogic(logic, filters, fields);
 }
 
 export function applyFilterLogicGroup(entries, filters, categories, ast, { vocabulary = null } = {}) {
@@ -336,8 +357,8 @@ export function applyFilterLogicGroup(entries, filters, categories, ast, { vocab
   return entries.filter((entry) => evalFilterAstWithCatMap(ast, entry, filters, catMap, vocabulary));
 }
 
-export function getFilterLogicGroups(filters, logic) {
-  const parsed = parseFilterLogic(logic, filters);
+export function getFilterLogicGroups(filters, logic, fields = FIELDS) {
+  const parsed = parseFilterLogic(logic, filters, fields);
   if (!parsed.valid || !parsed.ast) return [];
 
   return collectTopLevelOrGroups(parsed.ast).map((ast) => {
@@ -363,11 +384,12 @@ function flagTag(filter) {
   return flags.length ? ` [${flags.join(' ')}]` : '';
 }
 
-export function serializeFilters(filters, logic = '') {
-  let text = (logic || '').trim() || buildDefaultFilterLogic(filters);
+export function serializeFilters(filters, logic = '', fields = FIELDS) {
+  let text = (logic || '').trim() || buildDefaultFilterLogic(filters, fields);
   for (const filter of getActiveFilters(filters)) {
     const tag = flagTag(filter);
-    if (tag) text = text.split(describeFilter(filter)).join(describeFilter(filter) + tag);
+    const description = describeFilter(filter, fields);
+    if (tag) text = text.split(description).join(description + tag);
   }
   return text;
 }
@@ -378,11 +400,11 @@ export function serializeFilters(filters, logic = '') {
  * plain and carries the grouping as custom logic, exactly like Edit Logic.
  * Returns { filters, logic } or { error }.
  */
-export function parseFilterText(text) {
+export function parseFilterText(text, fields = FIELDS) {
   const source = String(text ?? '').trim();
   if (!source) return { error: 'Nothing to paste.' };
 
-  const fieldsByLength = [...FIELDS].sort((a, b) => b.label.length - a.label.length);
+  const fieldsByLength = [...fields].sort((a, b) => b.label.length - a.label.length);
   const tokens = [];
   let i = 0;
 
@@ -463,24 +485,24 @@ export function parseFilterText(text) {
     return { filters, logic: '' };
   }
 
-  const logic = tokens.map((t) => (t.type === 'FILTER' ? describeFilter(t.filter) : t.type))
+  const logic = tokens.map((t) => (t.type === 'FILTER' ? describeFilter(t.filter, fields) : t.type))
     .join(' ')
     .replace(/\( /g, '(')
     .replace(/ \)/g, ')');
-  const state = parseFilterLogic(logic, filters);
+  const state = parseFilterLogic(logic, filters, fields);
   if (!state.valid) return { error: state.error };
   return { filters, logic };
 }
 
-export function remapFilterLogic(logic, oldFilters, nextFilters) {
+export function remapFilterLogic(logic, oldFilters, nextFilters, fields = FIELDS) {
   if (!logic?.trim()) return logic;
 
   let nextLogic = logic;
   for (const oldFilter of oldFilters) {
     const nextFilter = nextFilters.find((filter) => filter.id === oldFilter.id);
     if (!nextFilter) continue;
-    const oldText = describeFilter(oldFilter);
-    const nextText = describeFilter(nextFilter);
+    const oldText = describeFilter(oldFilter, fields);
+    const nextText = describeFilter(nextFilter, fields);
     if (oldText === nextText) continue;
     nextLogic = nextLogic.split(oldText).join(nextText);
   }
@@ -491,11 +513,12 @@ export function remapFilterLogic(logic, oldFilters, nextFilters) {
 
 /**
  * `options.vocabulary` (from parseSearchVocabulary) widens text searches to
- * aliases and, for places, to what's inside them.
+ * aliases and, for places, to what's inside them. `options.fields` is the field
+ * list the logic text was written against (FIELDS unless said otherwise).
  */
 export function applyFilters(entries, filters, categories, logic = '', options = {}) {
   // Ignore filters whose value is empty and the op needs one
-  const parsed = parseFilterLogic(logic, filters);
+  const parsed = parseFilterLogic(logic, filters, options.fields || FIELDS);
   if (!parsed.valid) return applyFilters(entries, filters, categories, '', options);
   if (!parsed.ast) return entries;
 

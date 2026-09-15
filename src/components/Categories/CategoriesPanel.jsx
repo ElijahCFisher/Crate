@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useDeferredValue } from 'react';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
@@ -13,16 +13,26 @@ import Tooltip from '@mui/material/Tooltip';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
-import TextField from '@mui/material/TextField';
-import InputAdornment from '@mui/material/InputAdornment';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
-import SearchIcon from '@mui/icons-material/Search';
 import CreateCategoryDialog from './CreateCategoryDialog';
 import DeleteConfirmDialog from '../Entries/DeleteConfirmDialog';
+import FilterBar from '../Filters/FilterBar';
 import { formatDate } from '../../utils/dateUtils';
 import { evalAdditionalInfo } from '../../utils/mathUtils';
+import {
+  CATEGORY_FIELDS, applyFilters, getActiveFilters, getFilterLogicState,
+  makeDefaultFilter, remapFilterLogic,
+} from '../../utils/filterLogic';
+
+// Same `food_ratings_` prefix as the entries table's saved filters, so signing
+// out clears these too.
+const CATEGORY_FILTERS_KEY = 'food_ratings_category_filters_v1';
+function loadCategoryFilters() {
+  try { return JSON.parse(localStorage.getItem(CATEGORY_FILTERS_KEY) || 'null'); } catch { return null; }
+}
+const CATEGORY_FILTER_OPTIONS = { fields: CATEGORY_FIELDS };
 
 const COLUMNS = [
   { id: 'restaurantName', label: 'Name', sortable: true },
@@ -48,7 +58,27 @@ export default function CategoriesPanel({
   onAddCategory, // (categoryData) => entry  (for creating a parent on-the-fly)
   onRebalance,   // (updates: Map<uuid, newScore>) => void
 }) {
-  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState(() => loadCategoryFilters()?.filters || [makeDefaultFilter()]);
+  const [filterLogic, setFilterLogic] = useState(() => loadCategoryFilters()?.filterLogic || '');
+  useEffect(() => {
+    try { localStorage.setItem(CATEGORY_FILTERS_KEY, JSON.stringify({ filters, filterLogic })); } catch {}
+  }, [filters, filterLogic]);
+  const deferredFilters = useDeferredValue(filters);
+  const deferredFilterLogic = useDeferredValue(filterLogic);
+  const logicState = useMemo(
+    () => getFilterLogicState(filters, filterLogic, CATEGORY_FIELDS),
+    [filters, filterLogic]
+  );
+
+  function handleFiltersChange(nextFilters, meta) {
+    setFilters(nextFilters);
+    if (meta?.previousFilters && meta?.nextFilters) {
+      setFilterLogic((logic) => remapFilterLogic(logic, meta.previousFilters, meta.nextFilters, CATEGORY_FIELDS));
+    } else if (getActiveFilters(nextFilters).length === 0) {
+      setFilterLogic('');
+    }
+  }
+
   const [order, setOrder] = useState('asc');
   const [orderBy, setOrderBy] = useState('restaurantName');
 
@@ -62,18 +92,10 @@ export default function CategoriesPanel({
     [categories]
   );
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return categories;
-    return categories.filter((c) => {
-      const parentName = catMap.get(c.ratingCategory) || '';
-      return (
-        (c.restaurantName || '').toLowerCase().includes(q) ||
-        parentName.toLowerCase().includes(q) ||
-        (c.additionalInfo || '').toLowerCase().includes(q)
-      );
-    });
-  }, [categories, search, catMap]);
+  const filtered = useMemo(
+    () => applyFilters(categories, deferredFilters, categories, deferredFilterLogic, CATEGORY_FILTER_OPTIONS),
+    [categories, deferredFilters, deferredFilterLogic]
+  );
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -149,19 +171,23 @@ export default function CategoriesPanel({
           </Typography>
         </Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
-          <TextField
-            size="small"
-            placeholder="Search…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
-            sx={{ width: 200 }}
-          />
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setAddOpen(true)} size="small">
             Add Category
           </Button>
         </Box>
       </Box>
+
+      <FilterBar
+        filters={filters}
+        filterLogic={filterLogic}
+        logicState={logicState}
+        onFiltersChange={handleFiltersChange}
+        onFilterLogicChange={setFilterLogic}
+        entries={categories}
+        categories={categories}
+        filterOptions={CATEGORY_FILTER_OPTIONS}
+        fields={CATEGORY_FIELDS}
+      />
 
       <TableContainer component={Paper} variant="outlined">
         <Table size="small">
@@ -190,7 +216,7 @@ export default function CategoriesPanel({
                   <Typography variant="body2" color="text.secondary">
                     {categories.length === 0
                       ? 'No categories yet.'
-                      : 'No categories match your search.'}
+                      : 'No categories match your filters.'}
                   </Typography>
                 </TableCell>
               </TableRow>

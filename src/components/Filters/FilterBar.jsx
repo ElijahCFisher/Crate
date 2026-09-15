@@ -11,7 +11,7 @@ import ClearIcon from '@mui/icons-material/Clear';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ContentPasteIcon from '@mui/icons-material/ContentPaste';
 import FilterBuilder, { makeDefaultFilter } from './FilterBuilder';
-import { parseFilterText, serializeFilters } from '../../utils/filterLogic';
+import { FIELDS, parseFilterText, serializeFilters } from '../../utils/filterLogic';
 
 export default function FilterBar({
   filters,
@@ -23,6 +23,7 @@ export default function FilterBar({
   entries,
   categories,
   filterOptions,
+  fields = FIELDS,
 }) {
   const hasActiveFilter = filters.some((f) => f.value.trim() || ['isEmpty', 'isNotEmpty'].includes(f.op));
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -36,7 +37,7 @@ export default function FilterBar({
 
   async function copyFilter() {
     try {
-      await navigator.clipboard.writeText(serializeFilters(filters, filterLogic));
+      await navigator.clipboard.writeText(serializeFilters(filters, filterLogic, fields));
       setMessage('Filter copied');
     } catch {
       setMessage("Couldn't reach the clipboard");
@@ -51,12 +52,12 @@ export default function FilterBar({
     // is still there to paste into by hand when it doesn't.
     try {
       const clip = await navigator.clipboard.readText();
-      if (clip && !parseFilterText(clip).error) setPasteText(clip);
+      if (clip && !parseFilterText(clip, fields).error) setPasteText(clip);
     } catch {}
   }
 
   function applyPaste() {
-    const result = parseFilterText(pasteText);
+    const result = parseFilterText(pasteText, fields);
     if (result.error) {
       setPasteError(result.error);
       return;
@@ -78,6 +79,7 @@ export default function FilterBar({
         entries={entries}
         categories={categories}
         filterOptions={filterOptions}
+        fields={fields}
       />
       <Box sx={{ mt: 0.75, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
         {hasActiveFilter && (

@@ -35,6 +35,7 @@ export default function FilterBuilder({
   onChange,
   onFilterLogicChange,
   groupStatsByFilterId,
+  fields = FIELDS,  // which fields the rows offer (CATEGORY_FIELDS on the Categories tab)
   entries,          // optional: enables value suggestions
   categories = [],
   filterOptions,
@@ -90,7 +91,7 @@ export default function FilterBuilder({
     onChange(next, { previousFilters: filters, nextFilters: next });
   }
 
-  const visibleLogic = filterLogic || buildDefaultFilterLogic(filters);
+  const visibleLogic = filterLogic || buildDefaultFilterLogic(filters, fields);
 
   return (
     <Paper variant="outlined" sx={{ p: 1.5 }}>
@@ -156,7 +157,7 @@ export default function FilterBuilder({
             size="small"
             sx={{ minWidth: 130 }}
           >
-            {FIELDS.map((opt) => (
+            {fields.map((opt) => (
               <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
             ))}
           </Select>
