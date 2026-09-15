@@ -30,6 +30,8 @@ function parseFieldValue(fieldName, value) {
       return value !== '' && value != null ? parseInt(value, 10) : null;
     case 'identicals':
     case 'categories':
+    case 'tags':
+    case 'triedRatings':
       return typeof value === 'string'
         ? value.split('|').filter(Boolean)
         : Array.isArray(value) ? value : [];

@@ -626,12 +626,12 @@ function matchFilter(entry, filter, catMap, vocabulary = null) {
   if (field === 'any') {
     if (op === 'isEmpty' || op === 'isNotEmpty') {
       const rawStr = [entry.restaurantName, entry.specifier, entry.location, entry.additionalInfo,
-        allCatNamesStr(entry, catMap), entry.score != null ? String(entry.score) : ''].join(' ');
+        allCatNamesStr(entry, catMap), entry.score != null ? String(entry.score) : '', (entry.tags || []).join(' ')].join(' ');
       return op === 'isEmpty' ? !rawStr.trim() : !!rawStr.trim();
     }
     // Check all normal fields first
     const dataStr = [entry.restaurantName, entry.specifier, entry.location, entry.additionalInfo,
-      allCatNamesStr(entry, catMap), entry.score != null ? String(entry.score) : ''].join(' ');
+      allCatNamesStr(entry, catMap), entry.score != null ? String(entry.score) : '', (entry.tags || []).join(' ')].join(' ');
     const dataMatch = testText(dataStr, op, value, caseSensitive, useRegex, extras);
     // UUID: exact match only in normal mode, regex match in regex mode
     const uuid = String(entry.uuid ?? '');
@@ -653,6 +653,16 @@ function matchFilter(entry, filter, catMap, vocabulary = null) {
       return names.every((name) => testText(name, op, value, caseSensitive, useRegex, extras));
     }
     return testText(names.join(' '), op, value, caseSensitive, useRegex, extras);
+  }
+
+  // Tags are a list: = means one of them is that tag, not the list as a whole.
+  if (field === 'tags') {
+    const tags = Array.isArray(entry.tags) ? entry.tags : [];
+    if (op === 'isEmpty') return tags.length === 0;
+    if (op === 'isNotEmpty') return tags.length > 0;
+    if (op === 'equals') return tags.some((tag) => testText(tag, op, value, caseSensitive, useRegex, extras));
+    if (op === 'notContains') return tags.every((tag) => testText(tag, op, value, caseSensitive, useRegex, extras));
+    return testText(tags.join(' '), op, value, caseSensitive, useRegex, extras);
   }
 
   const rawStr = String(entry[field] ?? '');
@@ -713,12 +723,13 @@ function testString(haystack, op, needle, caseSensitive, useRegex) {
 
 // ── Value suggestions ─────────────────────────────────────────────────────────
 
-const SUGGESTIBLE_FIELDS = new Set(['any', 'restaurantName', 'specifier', 'location', 'additionalInfo', 'ratingCategory']);
+const SUGGESTIBLE_FIELDS = new Set(['any', 'restaurantName', 'specifier', 'location', 'additionalInfo', 'ratingCategory', 'tags']);
 
 function suggestionValues(entry, field, catMap) {
   if (field === 'ratingCategory') return categoryNames(entry, catMap);
+  if (field === 'tags') return entry.tags || [];
   if (field === 'any') {
-    return [entry.restaurantName, entry.specifier, entry.location, ...categoryNames(entry, catMap)];
+    return [entry.restaurantName, entry.specifier, entry.location, ...categoryNames(entry, catMap), ...(entry.tags || [])];
   }
   const value = String(entry[field] ?? '').trim();
   if (field === 'location' && value.includes(',')) return [value, ...locationParts(value).slice(1)];

@@ -21,6 +21,9 @@ export function createAdditionChange(entry, changeMethod = DEFAULT_METHOD) {
     picture: entry.picture ?? '',
     entryType: entry.entryType ?? 'food',
     linkedFields: entry.linkedFields ?? {},
+    status: entry.status ?? '',
+    tags: entry.tags ?? [],
+    triedRatings: entry.triedRatings ?? [],
     changeMethod,
     dateOfChange: Date.now(),
   };

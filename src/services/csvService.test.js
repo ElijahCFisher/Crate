@@ -30,6 +30,9 @@ const sampleEntry = {
   additionalInfo: 'crispy',
   picture: 'http://img',
   linkedFields: { restaurantName: ['x1', 'x2'], location: ['x1'] },
+  status: '',
+  tags: [],
+  triedRatings: [],
 };
 
 const sampleCategoryEntry = {
@@ -46,6 +49,9 @@ const sampleCategoryEntry = {
   additionalInfo: '',
   picture: '',
   linkedFields: {},
+  status: '',
+  tags: [],
+  triedRatings: [],
 };
 
 const sampleChange = {
@@ -68,6 +74,9 @@ const sampleChange = {
   changeMethod: 'manual, through the app',
   dateOfChange: DATE_MS,
   linkedFields: {},
+  status: '',
+  tags: [],
+  triedRatings: [],
 };
 
 // ── parseCombined ─────────────────────────────────────────────────────────────
@@ -439,5 +448,28 @@ describe('parseLinkedFields / serializeLinkedFields', () => {
     const change = { ...sampleChange, linkedFields: { restaurantName: ['u1'] } };
     const csv = generateChangelog({ changelog: [change] });
     expect(parseChangelog(csv)[0].linkedFields).toEqual({ restaurantName: ['u1'] });
+  });
+});
+
+describe('to-try columns', () => {
+  it('round-trips status, tags and tried ratings on a to-try entry', () => {
+    const entry = {
+      uuid: 't1', entryType: 'totry', identicals: [], categories: [], ratingCategory: '',
+      restaurantName: 'Big Sky Burger', specifier: '', location: 'Denver', score: null,
+      dateRated: 1, additionalInfo: 'closed Sun', picture: '', linkedFields: {},
+      status: 'tried', tags: ['doordash', 'with Mom'], triedRatings: ['r1', 'r2'],
+    };
+    const parsed = parseCombined(generateCombined({ combined: new Map([['t1', entry]]) })).get('t1');
+    expect(parsed).toMatchObject({ entryType: 'totry', status: 'tried', tags: ['doordash', 'with Mom'], triedRatings: ['r1', 'r2'] });
+  });
+
+  it('reads files written before the columns existed as blanks', () => {
+    const old = 'UUID,Entry Type,Restaurant Name\nu1,food,Crema';
+    expect(parseCombined(old).get('u1')).toMatchObject({ status: '', tags: [], triedRatings: [] });
+  });
+
+  it('carries the new fields through an addition change', () => {
+    const change = { changeUuid: 'c1', entryUuid: 't1', changeType: 'addition', entryType: 'totry', status: 'gone', tags: ['doordash'], triedRatings: [] };
+    expect(parseChangelog(generateChangelog({ changelog: [change] }))[0]).toMatchObject({ status: 'gone', tags: ['doordash'] });
   });
 });

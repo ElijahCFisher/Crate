@@ -24,6 +24,8 @@ function parseFieldValue(fieldName, value) {
       return value !== '' && value != null ? parseInt(value, 10) : null;
     case 'identicals':
     case 'categories':
+    case 'tags':
+    case 'triedRatings':
       return typeof value === 'string'
         ? value.split('|').filter(Boolean)
         : Array.isArray(value) ? value : [];
@@ -60,6 +62,9 @@ function entryFromAdditionChange(change) {
     additionalInfo: change.additionalInfo ?? '',
     picture: change.picture ?? '',
     linkedFields: change.linkedFields ?? {},
+    status: change.status ?? '',
+    tags: change.tags ?? [],
+    triedRatings: change.triedRatings ?? [],
   };
 }
 
@@ -110,6 +115,9 @@ const ENTRY_DEFAULTS = {
   additionalInfo: '',
   picture: '',
   linkedFields: {},
+  status: '',
+  tags: [],
+  triedRatings: [],
 };
 
 /**

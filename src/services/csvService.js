@@ -3,10 +3,14 @@ import Papa from 'papaparse';
 const COMBINED_MARKER = 'SECTION,COMBINED';
 const CHANGELOG_MARKER = 'SECTION,CHANGELOG';
 
+// Status, Tags and Tried Ratings belong to to-try entries (Entry Type "totry")
+// and stay blank on ratings and categories. They're appended, so files written
+// before they existed parse the same, and a parse of those files gives blanks.
 const COMBINED_FIELDS = [
   'UUID', 'Entry Type', 'Identicals', 'Categories', 'Rating Category',
   'Restaurant Name', 'Specifier', 'Location', 'Score', 'Date Rated',
   'Additional Information', 'Picture', 'Linked Fields',
+  'Status', 'Tags', 'Tried Ratings',
 ];
 
 const CHANGELOG_FIELDS = [
@@ -14,6 +18,7 @@ const CHANGELOG_FIELDS = [
   'Identicals', 'Categories', 'Rating Category', 'Restaurant Name',
   'Specifier', 'Location', 'Score', 'Date Rated', 'Additional Information',
   'Picture', 'Entry Type', 'Change Method', 'Date of Change', 'Linked Fields',
+  'Status', 'Tags', 'Tried Ratings',
 ];
 
 // ── Split-file parse / generate (two separate Drive files) ───────────────────
@@ -167,6 +172,9 @@ function rowToEntry(row) {
     additionalInfo: row['Additional Information'] || '',
     picture: row['Picture'] || '',
     linkedFields: parseLinkedFields(row['Linked Fields']),
+    status: row['Status'] || '',
+    tags: parseList(row['Tags']),
+    triedRatings: parseList(row['Tried Ratings']),
   };
 }
 
@@ -185,6 +193,9 @@ function entryToRow(entry) {
     'Additional Information': entry.additionalInfo || '',
     'Picture': entry.picture || '',
     'Linked Fields': serializeLinkedFields(entry.linkedFields),
+    'Status': entry.status || '',
+    'Tags': serializeList(entry.tags),
+    'Tried Ratings': serializeList(entry.triedRatings),
   };
 }
 
@@ -209,6 +220,9 @@ function rowToChange(row) {
     changeMethod: row['Change Method'] || '',
     dateOfChange: parseNum(row['Date of Change'], parseInt),
     linkedFields: parseLinkedFields(row['Linked Fields']),
+    status: row['Status'] || '',
+    tags: parseList(row['Tags']),
+    triedRatings: parseList(row['Tried Ratings']),
   };
 }
 
@@ -233,5 +247,8 @@ function changeToRow(change) {
     'Change Method': change.changeMethod || '',
     'Date of Change': change.dateOfChange != null ? change.dateOfChange : '',
     'Linked Fields': serializeLinkedFields(change.linkedFields),
+    'Status': change.status || '',
+    'Tags': serializeList(change.tags),
+    'Tried Ratings': serializeList(change.triedRatings),
   };
 }

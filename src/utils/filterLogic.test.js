@@ -206,3 +206,24 @@ describe('filtering categories', () => {
     expect(parseFilterText('Restaurant/Brand contains "Egg"', CATEGORY_FIELDS).error).toMatch(/field/);
   });
 });
+
+describe('filtering by tags', () => {
+  const tagged = [
+    { uuid: 't1', restaurantName: 'Baggins', tags: ['DoorDash', 'with Sam'] },
+    { uuid: 't2', restaurantName: 'Big Sky', tags: [] },
+    { uuid: 't3', restaurantName: 'Sauce', tags: ['DoorDash pickup'] },
+  ];
+
+  it('= matches one whole tag; contains searches them all; Any field includes them', () => {
+    expect(ids(applyFilters(tagged, [filter('tags', 'equals', 'doordash')], []))).toEqual(['t1']);
+    expect(ids(applyFilters(tagged, [filter('tags', 'contains', 'doordash')], []))).toEqual(['t1', 't3']);
+    expect(ids(applyFilters(tagged, [filter('tags', 'isEmpty', '')], []))).toEqual(['t2']);
+    expect(ids(applyFilters(tagged, [filter('any', 'contains', 'with sam')], []))).toEqual(['t1']);
+  });
+
+  it('suggests each tag on its own', () => {
+    const f = filter('tags', 'contains', '');
+    expect(countFilterSuggestions(tagged, [f], [], f.id).map((s) => s.value))
+      .toEqual(['DoorDash', 'DoorDash pickup', 'with Sam']);
+  });
+});
