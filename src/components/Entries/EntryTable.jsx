@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useDeferredValue } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
@@ -31,6 +31,7 @@ import {
   getFilterLogicGroups,
   getFilterLogicState,
   getActiveFilters,
+  describeFilter,
   makeDefaultFilter,
   remapFilterLogic,
 } from '../Filters/FilterBuilder';
@@ -346,11 +347,50 @@ export default function EntryTable({
 
   const totalPages = Math.max(1, Math.ceil(groups.length / rowsPerPage));
 
-  // Reset page and collapse all groups when filters or sort change
+  // What the filters actually select. Adding a blank row, deleting an unused
+  // one, or anything else that doesn't change the query leaves this alone, so
+  // none of those move you off the page you're on.
+  const filterKey = useMemo(
+    () => JSON.stringify([
+      getActiveFilters(deferredFilters).map((f) => [f.connector, describeFilter(f), f.caseSensitive, f.useRegex]),
+      deferredFilterLogic,
+    ]),
+    [deferredFilters, deferredFilterLogic]
+  );
+
+  // The entry at the top of the page you're looking at. When the query changes
+  // and that entry is still in the results, the page follows it — so removing a
+  // filter keeps you where you were instead of throwing you back to page 1.
+  const anchorUuidRef = useRef(null);
+  const prevFilterKeyRef = useRef(filterKey);
+  const [lockedHeight, setLockedHeight] = useState(0);
+
   useEffect(() => {
+    if (prevFilterKeyRef.current === filterKey) return;
+    prevFilterKeyRef.current = filterKey;
+    const anchor = anchorUuidRef.current;
+    const idx = anchor
+      ? groups.findIndex((g) => g.primary.uuid === anchor || g.others.some((o) => o.uuid === anchor))
+      : -1;
+    setPage(idx >= 0 ? Math.floor(idx / rowsPerPage) : 0);
+    setLockedHeight(0);
+  }, [filterKey, groups, rowsPerPage]);
+
+  // A new sort order is a new list; starting from the top is what you expect.
+  const sortKey = `${orderBy}:${order}`;
+  const prevSortKeyRef = useRef(sortKey);
+  useEffect(() => {
+    if (prevSortKeyRef.current === sortKey) return;
+    prevSortKeyRef.current = sortKey;
     setPage(0);
     setExpandedGroups(new Set());
-  }, [deferredFilters, deferredFilterLogic, orderBy, order]); // eslint-disable-line react-hooks/exhaustive-deps
+    setLockedHeight(0);
+  }, [sortKey]);
+
+  // Data changes (an edit, a delete) keep the page, just not past the end.
+  useEffect(() => {
+    if (page > totalPages - 1) setPage(totalPages - 1);
+  }, [page, totalPages]);
 
   // Keep pageInput in sync with page state
   useEffect(() => {
@@ -361,6 +401,21 @@ export default function EntryTable({
     () => groups.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage),
     [groups, page, rowsPerPage]
   );
+
+  // Declared after the query effect above, so that effect still sees the
+  // anchor from before the change.
+  useEffect(() => {
+    anchorUuidRef.current = pagedGroups[0]?.primary.uuid ?? null;
+  }, [pagedGroups]);
+
+  // Paging to a shorter page (the last one, or one without pictures) would
+  // shrink the table and pull the pagination controls up under the mouse —
+  // right onto a row's delete button. Hold the height while paging.
+  const tableContainerRef = useRef(null);
+  function holdTableHeight() {
+    const h = tableContainerRef.current?.offsetHeight || 0;
+    setLockedHeight((prev) => Math.max(prev, h));
+  }
 
   function handleSort(col) {
     if (orderBy === col) {
@@ -380,16 +435,21 @@ export default function EntryTable({
     }
   }
 
-  function handlePageChange(_, newPage) { setPage(newPage); }
+  function handlePageChange(_, newPage) {
+    holdTableHeight();
+    setPage(newPage);
+  }
 
   function handleRowsPerPageChange(e) {
     setRowsPerPage(parseInt(e.target.value, 10));
     setPage(0);
+    setLockedHeight(0);
   }
 
   function commitPageInput() {
     const n = parseInt(pageInput, 10);
     if (!isNaN(n) && n >= 1 && n <= totalPages) {
+      if (n - 1 !== page) holdTableHeight();
       setPage(n - 1);
     } else {
       setPageInput(String(page + 1));
@@ -565,7 +625,12 @@ export default function EntryTable({
 
       {loading && <LinearProgress sx={{ mb: 1 }} />}
 
-      <TableContainer component={Paper} variant="outlined">
+      <TableContainer
+        component={Paper}
+        variant="outlined"
+        ref={tableContainerRef}
+        sx={{ minHeight: lockedHeight || undefined }}
+      >
         <Table size="small">
           <TableHead>
             <TableRow>
@@ -619,8 +684,14 @@ export default function EntryTable({
         </Table>
       </TableContainer>
 
-      {/* Pagination row */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+      {/* Pagination row — pinned to the bottom of the viewport while the table
+          is taller than it, so paging never moves the controls. */}
+      <Box
+        sx={{
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap',
+          position: 'sticky', bottom: 0, zIndex: 2, bgcolor: 'background.default',
+        }}
+      >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 1 }}>
           <Typography variant="body2" color="text.secondary">Page</Typography>
           <TextField

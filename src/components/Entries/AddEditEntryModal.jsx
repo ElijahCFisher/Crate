@@ -1393,13 +1393,6 @@ export default function AddEditEntryModal({
           {/* Kept mounted so switching tabs doesn't lose focus or scroll position. */}
           <Box sx={{ display: mode === 'form' ? 'block' : 'none' }}>
           <Grid container spacing={2}>
-            {/* ── UUID (read-only, edit mode only) ─────────────────────── */}
-            {isEdit && entry?.uuid && (
-              <Grid item xs={12}>
-                <CopyableUuidField uuid={entry.uuid} />
-              </Grid>
-            )}
-
             {/* ── Primary Rating ──────────────────────────────────────── */}
             <Grid item xs={12}>
               <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 0.5 }}>
@@ -1598,6 +1591,13 @@ export default function AddEditEntryModal({
                 </>
               );
             })()}
+
+            {/* ── UUID (read-only, edit mode only) — reference, so it sits last ── */}
+            {isEdit && entry?.uuid && (
+              <Grid item xs={12}>
+                <CopyableUuidField uuid={entry.uuid} />
+              </Grid>
+            )}
           </Grid>
           </Box>
         </DialogContent>

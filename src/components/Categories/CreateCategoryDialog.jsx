@@ -195,12 +195,6 @@ export default function CreateCategoryDialog({
         <DialogContent dividers>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
           <Grid container spacing={2}>
-            {/* UUID — read-only, shown in edit mode only */}
-            {isEditMode && editEntry?.uuid && (
-              <Grid item xs={12}>
-                <CopyableUuidField uuid={editEntry.uuid} />
-              </Grid>
-            )}
             <Grid item xs={12}>
               <TextField
                 label="Category Name"
@@ -360,6 +354,13 @@ export default function CreateCategoryDialog({
                   </>
                 )}
               </>
+            )}
+
+            {/* UUID — read-only, edit mode only; reference, so it sits last */}
+            {isEditMode && editEntry?.uuid && (
+              <Grid item xs={12}>
+                <CopyableUuidField uuid={editEntry.uuid} />
+              </Grid>
             )}
           </Grid>
         </DialogContent>
