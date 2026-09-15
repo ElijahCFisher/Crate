@@ -13,6 +13,8 @@ import DeleteConfirmDialog from '../Entries/DeleteConfirmDialog';
 import ExportImportDialog from '../ExportImport/ExportImportDialog';
 import CategoriesPanel from '../Categories/CategoriesPanel';
 import CreateCategoryDialog from '../Categories/CreateCategoryDialog';
+import ToTryPanel from '../ToTry/ToTryPanel';
+import { openItemsMatchingRating, ratingPrefillFromItem, statusOf } from '../../utils/toTryUtils';
 import BulkAddsPanel from '../BulkAdds/BulkAddsPanel';
 import FriendsPanel from '../Friends/FriendsPanel';
 import FollowRequestDialog from '../Friends/FollowRequestDialog';
@@ -52,6 +54,8 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     combined,
     foodEntries,
     categories,
+    toTryItems,
+    addToTryItems,
     fileId: dataFileId,
     folderId,
     picturesFolderId,
@@ -88,10 +92,13 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
   const wideScreen = useMediaQuery((theme) => theme.breakpoints.up('md'), { noSsr: true });
   const [tabPosition] = useDevicePreference(TAB_POSITION_KEY, 'side', TAB_POSITIONS);
   const sideTabs = wideScreen && tabPosition === 'side';
+  const openToTryCount = toTryItems.filter((i) => statusOf(i) === 'open').length;
   // Tabs needs its Tab children directly, so the same list serves both layouts.
   const tabItems = [
     <Tab key="entries" value="entries"
       label={`Food Entries${foodEntries.length ? ` (${foodEntries.length})` : ''}`} />,
+    <Tab key="totry" value="totry"
+      label={`To Try${openToTryCount ? ` (${openToTryCount})` : ''}`} />,
     <Tab key="categories" value="categories"
       label={`Categories${categories.length ? ` (${categories.length})` : ''}`} />,
     <Tab key="bulkAdds" value="bulkAdds"
@@ -107,6 +114,10 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
   const [editingEntry, setEditingEntry] = useState(null);
   const [bulkAddEntries, setBulkAddEntries] = useState(null);
   const [cloneSource, setCloneSource] = useState(null);
+  // The to-try item being rated through Add Entry, and open items a newly
+  // saved rating seems to tick off.
+  const [ratingToTry, setRatingToTry] = useState(null);
+  const [toTryMatch, setToTryMatch] = useState(null);
   // A category opened from its chip in the entries table.
   const [viewingCategory, setViewingCategory] = useState(null);
   const [deleteDialogEntry, setDeleteDialogEntry] = useState(null);
@@ -182,6 +193,7 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     setEditingEntry(null);
     setBulkAddEntries(null);
     setCloneSource(null);
+    setRatingToTry(null);
     setAddEditOpen(true);
   }
 
@@ -189,6 +201,7 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     setEditingEntry(null);
     setBulkAddEntries(entries);
     setCloneSource(null);
+    setRatingToTry(null);
     setAddEditOpen(true);
   }
 
@@ -196,6 +209,7 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     setEditingEntry(entry);
     setBulkAddEntries(null);
     setCloneSource(null);
+    setRatingToTry(null);
     setAddEditOpen(true);
   }
 
@@ -203,6 +217,7 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     setEditingEntry(null);
     setBulkAddEntries(null);
     setCloneSource(entry);
+    setRatingToTry(null);
     setAddEditOpen(true);
   }
 
@@ -211,6 +226,7 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     setEditingEntry(null);
     setBulkAddEntries(null);
     setCloneSource(null);
+    setRatingToTry(null);
   }
 
   function openCategory(uuid) {
@@ -313,9 +329,53 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     }
   }
 
+  /**
+   * After new ratings are saved: if they came from a to-try item's Rate button,
+   * that item is now tried and remembers them. Otherwise, if they match open
+   * to-try items, offer to tick those off.
+   */
+  function reconcileToTry(newEntries) {
+    if (!newEntries?.length) return;
+    if (ratingToTry) {
+      const current = toTryItems.find((i) => i.uuid === ratingToTry.uuid) || ratingToTry;
+      modifyEntry(current.uuid, {
+        status: 'tried',
+        triedRatings: [...new Set([...(current.triedRatings || []), ...newEntries.map((e) => e.uuid)])],
+      });
+      return;
+    }
+    const matches = new Map(); // item uuid → { item, ratingUuids }
+    for (const entry of newEntries) {
+      for (const item of openItemsMatchingRating(toTryItems, entry)) {
+        if (!matches.has(item.uuid)) matches.set(item.uuid, { item, ratingUuids: [] });
+        matches.get(item.uuid).ratingUuids.push(entry.uuid);
+      }
+    }
+    if (matches.size > 0) setToTryMatch([...matches.values()]);
+  }
+
+  function markMatchedTried() {
+    for (const { item, ratingUuids } of toTryMatch || []) {
+      modifyEntry(item.uuid, {
+        status: 'tried',
+        triedRatings: [...new Set([...(item.triedRatings || []), ...ratingUuids])],
+      });
+    }
+    setToTryMatch(null);
+  }
+
+  function openRateFromToTry(item) {
+    setEditingEntry(null);
+    setBulkAddEntries(null);
+    setCloneSource(ratingPrefillFromItem(item));
+    setRatingToTry(item);
+    setAddEditOpen(true);
+  }
+
   function handleSaveGroups(groups, linkPlan = null) {
     const builtGroups = addEntryGroups(groups, settingsFileId);
     applyLinkPlan(linkPlan, builtGroups || []);
+    reconcileToTry((builtGroups || []).flat());
     if (builtGroups) {
       const allUuids = builtGroups.flat().map((e) => e.uuid);
       // addEntryGroups already persists the bulkAdds entry (via
@@ -345,6 +405,7 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     if (allNewUuids.length > 0 && bulkAddEntries?.length > 0) {
       updateBulkAdd(bulkAddEntries[0].uuid, allNewUuids);
     }
+    reconcileToTry(createdByGroup.flat());
   }
 
   function handleAddCategory(categoryData) {
@@ -451,6 +512,20 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
           />
         )}
 
+        {tab === 'totry' && (
+          <ToTryPanel
+            items={toTryItems}
+            categories={categories}
+            foodEntries={foodEntries}
+            searchVocabulary={searchVocabulary}
+            onAdd={addToTryItems}
+            onModify={modifyEntry}
+            onDelete={deleteEntry}
+            onRate={openRateFromToTry}
+            onOpenRating={openEdit}
+          />
+        )}
+
         {tab === 'categories' && (
           <CategoriesPanel
             categories={categories}
@@ -509,6 +584,9 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
         entry={editingEntry}
         initialEntries={bulkAddEntries}
         prefill={cloneSource}
+        prefillTitle={ratingToTry
+          ? `Rate: ${[ratingToTry.restaurantName, ratingToTry.specifier].filter(Boolean).join(' — ') || 'To Try item'}`
+          : undefined}
         categories={categories}
         foodEntries={foodEntries}
         onSave={handleSave}
@@ -559,6 +637,24 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
         foodEntries={foodEntries}
         categories={categories}
         onReplaceAll={handleReplaceAll}
+      />
+
+      {/* A new rating matched open To Try items */}
+      <Snackbar
+        open={!!toTryMatch}
+        autoHideDuration={10000}
+        onClose={(_, reason) => { if (reason !== 'clickaway') setToTryMatch(null); }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        message={toTryMatch
+          ? toTryMatch.length === 1
+            ? `${[toTryMatch[0].item.restaurantName, toTryMatch[0].item.specifier].filter(Boolean).join(' — ')} is on your To Try list`
+            : `${toTryMatch.length} of these are on your To Try list`
+          : ''}
+        action={
+          <Button color="secondary" size="small" onClick={markMatchedTried}>
+            Mark tried
+          </Button>
+        }
       />
 
       {/* Linked-field propagation notice */}

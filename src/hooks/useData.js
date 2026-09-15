@@ -13,6 +13,7 @@ import {
   createDeletionChange,
 } from '../utils/changelogUtils';
 import { DRIVE_FOLDER_NAME, DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME, DRIVE_PICTURES_FOLDER_NAME } from '../config';
+import { makeToTryItem, TOTRY_TYPE } from '../utils/toTryUtils';
 
 // ── Offline persistence helpers ───────────────────────────────────────────────
 const CACHE_KEY  = 'food_ratings_data_cache_v1';
@@ -603,6 +604,42 @@ export function useData(isAuthenticated) {
   }, []);
 
   /**
+   * Add to-try items — one or a whole imported list — in a single Drive write.
+   * Unlike ratings added together they aren't identicals of each other, so
+   * this skips that linking. Returns the built items.
+   */
+  const addToTryItems = useCallback((itemDataArray) => {
+    const currentCombined = combinedRef.current;
+    const items = itemDataArray.map((d) => ({
+      ...makeToTryItem(d),
+      uuid: uuidv4(),
+      categories: computeCategories(d.ratingCategory || '', currentCombined),
+    }));
+    if (items.length === 0) return [];
+
+    const changes = items.map((e) => createAdditionChange(e));
+    const newChangelog = [...changelogRef.current, ...changes];
+    changelogRef.current = newChangelog;
+
+    let newCombined;
+    setCombined((prev) => {
+      const next = new Map(prev);
+      items.forEach((e) => next.set(e.uuid, e));
+      newCombined = next;
+      return next;
+    });
+    setChangelog((prev) => [...prev, ...changes]);
+
+    withSyncBackground(
+      (fids) => dataService.addEntries(fids, items),
+      { type: 'addEntries', entries: items },
+      newCombined,
+      newChangelog,
+    );
+    return items;
+  }, []);
+
+  /**
    * Add a category entry. Returns the entry synchronously so callers can
    * use the UUID right away (e.g. to select it in a dropdown).
    */
@@ -720,7 +757,8 @@ export function useData(isAuthenticated) {
       if (fmt === 'app') {
         const { combined: imp } = csvService.parse(csvText);
         const cats    = Array.from(imp.values()).filter((e) => e.entryType === 'category');
-        const entries = Array.from(imp.values()).filter((e) => e.entryType === 'food');
+        // To-try items ride along with ratings; an app export carries both.
+        const entries = Array.from(imp.values()).filter((e) => e.entryType === 'food' || e.entryType === TOTRY_TYPE);
         return dataService.importEntries(fids, entries, cats);
       } else if (fmt === 'changelog') {
         const changes = csvText.trim().startsWith('SECTION,CHANGELOG')
@@ -866,6 +904,7 @@ export function useData(isAuthenticated) {
 
   const categories  = Array.from(combined.values()).filter((e) => e.entryType === 'category');
   const foodEntries = Array.from(combined.values()).filter((e) => e.entryType === 'food');
+  const toTryItems  = Array.from(combined.values()).filter((e) => e.entryType === TOTRY_TYPE);
 
   /**
    * Forget everything this device knows: the cached ratings, the offline queue
@@ -883,8 +922,8 @@ export function useData(isAuthenticated) {
   }, []);
 
   return {
-    combined, changelog, categories, foodEntries,
-    clearLocalData,
+    combined, changelog, categories, foodEntries, toTryItems,
+    clearLocalData, addToTryItems,
     fileId: combinedFileId, folderId, picturesFolderId, loading, syncing, syncError, setSyncError,
     isOffline, pendingCount,
     addEntry, addEntryGroups, addEntriesWithLinks, addCategory, modifyEntry, deleteEntry,

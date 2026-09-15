@@ -629,6 +629,7 @@ export default function AddEditEntryModal({
   entry,
   initialEntries,
   prefill,      // add mode only: an entry to start the new one from (Clone)
+  prefillTitle, // add mode only: what to call the dialog when starting from `prefill`
   categories,
   foodEntries = [],
   onSave,
@@ -1456,7 +1457,7 @@ export default function AddEditEntryModal({
     <>
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <form onSubmit={handleSubmit}>
-        <DialogTitle>{isEdit ? 'Edit Entry' : isBulkEdit ? 'Bulk Add' : prefill ? 'Add Entry (cloned)' : 'Add Entry'}</DialogTitle>
+        <DialogTitle>{isEdit ? 'Edit Entry' : isBulkEdit ? 'Bulk Add' : prefill ? (prefillTitle || 'Add Entry (cloned)') : 'Add Entry'}</DialogTitle>
         <DialogContent dividers>
           {saveError && <Alert severity="error" sx={{ mb: 2 }}>{saveError}</Alert>}
 

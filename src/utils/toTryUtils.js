@@ -245,12 +245,13 @@ function guessHeaderKind(header, state, ctx) {
   const genreish = !!resolveGenre(name, ctx.categoryIndex)
     || GENRE_WORDS.some((w) => new RegExp(`\\b${w}\\b`, 'i').test(name));
   if (genreish) return state.brand ? 'sublist' : 'genre';
-  if (state.place && ctx.locations.some((loc) => {
+  // Signs of a neighborhood win over "it's a known location" while a place is
+  // active: a street name, a known "X, <this place>", or following another area.
+  if (state.place && (STREETISH.test(name) || state.lastKind === 'area' || ctx.locations.some((loc) => {
     const parts = loc.split(',').map(normalizeName);
     return parts.length > 1 && parts[0] === key && parts.includes(normalizeName(state.place));
-  })) return 'area';
+  }))) return 'area';
   if (ctx.locationParts.has(key)) return 'place';
-  if (state.place && (STREETISH.test(name) || state.lastKind === 'area')) return 'area';
   // Unknown names default to places: a place mistaken for a sub-list would drag
   // the brand across every line after it, which is the worse mistake to fix.
   return 'place';
