@@ -229,6 +229,37 @@ describe('category paths', () => {
     expect(resolveCategoryPhrase('egg > breakfast', deep)).toBeNull();
   });
 
+  // The same leaf name sitting BOTH directly under a parent and deeper under it:
+  // "main > chicken" and "main > sandwich > chicken". Both have "main" above
+  // them, so a path that only checks ancestry cannot tell them apart.
+  const nested = [
+    { uuid: 'c-main', restaurantName: 'main', ratingCategory: '' },
+    { uuid: 'c-sandwich2', restaurantName: 'sandwich', ratingCategory: 'c-main' },
+    { uuid: 'c-main-chicken', restaurantName: 'chicken', ratingCategory: 'c-main' },
+    { uuid: 'c-sandwich-chicken', restaurantName: 'chicken', ratingCategory: 'c-sandwich2' },
+  ];
+  const nestedIndex = buildCategoryIndex(nested);
+
+  it('prefers the real parent chain over a name merely somewhere above', () => {
+    expect(resolveCategoryMatches('main/chicken', nestedIndex)).toEqual(['c-main-chicken']);
+    expect(resolveCategoryMatches('sandwich/chicken', nestedIndex)).toEqual(['c-sandwich-chicken']);
+    expect(resolveCategoryMatches('main > sandwich > chicken', nestedIndex))
+      .toEqual(['c-sandwich-chicken']);
+  });
+
+  it('resolves a full path on a rating line without warning', () => {
+    const { ratings, warnings } = parseText(
+      'Diner\nDenver\nChicken nugget 8 main/chicken Left overs (reheated via air fryer)',
+      nested,
+    );
+    expect(warnings).toEqual([]);
+    expect(ratings[0]).toMatchObject({
+      specifier: 'Chicken nugget',
+      ratingCategory: 'c-main-chicken',
+      additionalInfo: 'Left overs (reheated via air fryer)',
+    });
+  });
+
   it('reports every category a bare name could mean', () => {
     expect(resolveCategoryMatches('egg', sharedIndex)).toEqual(['c-breakfast-egg', 'c-side-egg']);
     expect(resolveCategoryMatches('greek', sharedIndex)).toEqual(['c-greek']);

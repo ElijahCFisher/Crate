@@ -100,10 +100,23 @@ function hasAncestorPath(category, names, byUuid) {
 }
 
 /**
+ * True when `names` (closest ancestor first) ARE the immediate parent chain,
+ * with no category in between. "main/chicken" matching only loosely is what let
+ * it mean both "main > chicken" and "main > sandwich > chicken" at once, so a
+ * full path could not do the one thing paths exist for.
+ */
+function isParentChain(category, names, byUuid) {
+  const chain = ancestorNames(category, byUuid);
+  return names.every((name, i) => chain[i] === name);
+}
+
+/**
  * Every existing category a phrase could mean, best first. Never invents one.
  * An exact name wins; failing that the phrase is read as a path from the
- * outside in ("breakfast > egg", "breakfast/egg"); failing that "chicken
- * sandwich" looks for a "chicken" category somewhere under a "sandwich" one.
+ * outside in ("breakfast > egg", "breakfast/egg"), preferring a path that names
+ * the real parent chain over one that merely has those names somewhere above;
+ * failing that "chicken sandwich" looks for a "chicken" category somewhere
+ * under a "sandwich" one.
  */
 export function resolveCategoryMatches(phrase, index) {
   const key = normalize(phrase);
@@ -117,9 +130,14 @@ export function resolveCategoryMatches(phrase, index) {
     const leaf = segments[segments.length - 1];
     // The path reads outermost-first; the ancestor chain reads inside-out.
     const wanted = segments.slice(0, -1).reverse();
-    return (index.byName.get(leaf) || [])
-      .filter((c) => hasAncestorPath(c, wanted, index.byUuid))
-      .map((c) => c.uuid);
+    const loose = (index.byName.get(leaf) || [])
+      .filter((c) => hasAncestorPath(c, wanted, index.byUuid));
+    // A path that names the real parent chain wins outright, so writing one is
+    // how you pick between categories sharing a name. Only when nothing matches
+    // that tightly does a gappy path ("main/chicken" for something nested
+    // deeper) still resolve, which is the convenience worth keeping.
+    const exactChain = loose.filter((c) => isParentChain(c, wanted, index.byUuid));
+    return (exactChain.length > 0 ? exactChain : loose).map((c) => c.uuid);
   }
 
   const words = key.split(' ');
