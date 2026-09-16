@@ -1003,8 +1003,9 @@ export default function AddEditEntryModal({
           {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>breakfast &gt; egg</Box>
           {' '}to say which. A line of its own holding nothing but a date —
           {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>9/1</Box>{' '}(this year) or
-          {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>9/1/25</Box>{' '}—
-          dates every rating in that block.
+          {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>9/1/25</Box>{' '}— dates what is
+          above it: the one rating it sits under, the whole restaurant when it closes one, or every
+          restaurant above it that hasn't said otherwise.
         </Typography>
         {textErrors.length > 0 && (
           <Alert severity="warning" sx={{ mt: 1.5 }}>

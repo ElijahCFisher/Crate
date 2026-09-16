@@ -22,8 +22,15 @@
  * its notes get prefixed with "From <that food>".
  *
  * A line that is nothing but a date — `9/1`, `9/1/25`, `9/1/2025`, `2025-09-01`
- * — sets the date for every rating in its block, wherever it sits in the block.
- * A bare `9/1` means this year.
+ * — dates what is *above* it. A bare `9/1` means this year. Each rating takes
+ * the first of these that exists:
+ *
+ *   1. a date directly under that rating;
+ *   2. a date under the whole group of ratings for that restaurant;
+ *   3. a date under the restaurant name, before any of its ratings;
+ *   4. the nearest date anywhere below it — so one date at the bottom covers
+ *      every restaurant above it that hasn't said otherwise;
+ *   5. nothing, which leaves the rating's own date alone (today, for a new one).
  *
  * Categories are only ever *inferred*, never created: whatever follows the
  * score is matched against existing category names longest-phrase-first, and
@@ -280,11 +287,45 @@ export function parseRatingLine(line, { indented = false, index, parentFood = ''
   return { specifier, score, ratingCategory, additionalInfo, indented, warning };
 }
 
+/** The date line closing a block, if its last line is one. */
+function blockTrailingDate(block) {
+  const last = block?.events[block.events.length - 1];
+  return last?.type === 'date' ? last.date : '';
+}
+
+/** A date under the restaurant name, before any of its ratings. */
+function blockLeadingDate(block) {
+  const first = block?.events[0];
+  return first?.type === 'date' ? first.date : '';
+}
+
+/**
+ * Hand each rating its date, most specific placement first — see the rules at
+ * the top of this file. A rating with no date below it anywhere is left blank,
+ * which means "keep the date it already has".
+ */
+function resolveRatingDates(events) {
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    if (event.type !== 'rating') continue;
+
+    let date = events[i + 1]?.type === 'date' ? events[i + 1].date : '';
+    if (!date) date = blockTrailingDate(event.block);
+    if (!date) date = blockLeadingDate(event.block);
+    if (!date) {
+      for (let j = i + 1; j < events.length; j++) {
+        if (events[j].type === 'date') { date = events[j].date; break; }
+      }
+    }
+    event.rating.dateRated = date;
+  }
+}
+
 /**
  * Parse the whole box. Returns flat ratings (each carrying the restaurant,
- * location and date of its block, plus the source line number for re-matching),
- * any lines that couldn't be read, and warnings about categories that had to
- * be guessed at.
+ * location and date that apply to it, plus the source line number for
+ * re-matching), any lines that couldn't be read, and warnings about categories
+ * that had to be guessed at.
  */
 export function parseText(text, categories = [], { now = new Date() } = {}) {
   const index = buildCategoryIndex(categories);
@@ -292,6 +333,9 @@ export function parseText(text, categories = [], { now = new Date() } = {}) {
   const errors = [];
   const warnings = [];
   const blocks = [];
+  // Ratings and date lines in the order they appear, so each rating can be
+  // given the date that applies to it once the whole text has been read.
+  const events = [];
 
   let block = null;
   let parentFood = '';
@@ -307,6 +351,16 @@ export function parseText(text, categories = [], { now = new Date() } = {}) {
     const indented = INDENT_PATTERN.test(raw);
     const line = raw.trim();
 
+    // A line that is only a date is never a restaurant name or a location —
+    // it dates what's above it, even standing alone after a blank line.
+    const date = parseDateLine(line, now);
+    if (date) {
+      const event = { type: 'date', date, block, lineNumber };
+      events.push(event);
+      block?.events.push(event);
+      return;
+    }
+
     if (!block) {
       block = {
         restaurantName: line === NO_SCORE ? '' : line,
@@ -315,16 +369,9 @@ export function parseText(text, categories = [], { now = new Date() } = {}) {
         seenBody: false,
         ratingCount: 0,
         ratings: [],
+        events: [],
       };
       blocks.push(block);
-      return;
-    }
-
-    // A line that is only a date belongs to the whole block, wherever in the
-    // block it sits, and doesn't use up the slot the location would go in.
-    const date = parseDateLine(line, now);
-    if (date) {
-      block.dateRated = date;
       return;
     }
 
@@ -355,14 +402,15 @@ export function parseText(text, categories = [], { now = new Date() } = {}) {
       lineNumber,
     };
     block.ratings.push(rating);
+    block.events.push({ type: 'rating', rating, block, lineNumber });
+    events.push(block.events[block.events.length - 1]);
     ratings.push(rating);
   });
 
-  // The date line usually sits at the bottom of its block, so it's handed out
-  // once the whole block has been read.
-  for (const b of blocks) {
-    for (const rating of b.ratings) rating.dateRated = b.dateRated;
-  }
+  resolveRatingDates(events);
+  // A block with no ratings yet still has a date if one was written under it —
+  // that's a restaurant typed ahead of what you ate there.
+  for (const b of blocks) b.dateRated = blockTrailingDate(b) || blockLeadingDate(b);
 
   return { ratings, errors, warnings, blocks };
 }
@@ -378,40 +426,21 @@ export function generateTextLines(ratings, categories = [], { now = new Date() }
   const index = buildCategoryIndex(categories);
   const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const out = [];
+  const blocks = [];
+  const written = []; // rendered rating lines in order, with the date each needs
   let block = null;
   let parentFood = '';
 
-  /**
-   * A block is written out once it's complete, so its date can go at the
-   * bottom. A block with nothing in it writes nothing — that's the blank
-   * rating a new entry starts with, which shouldn't put a line in the box.
-   */
-  function flush() {
-    if (!block) return;
-    const { restaurantName, location, date, lines } = block;
-    block = null;
-    if (lines.length === 0 && !restaurantName && !location) return;
-    if (out.length > 0) out.push({ text: '', id: null });
-    // A block with no restaurant still needs a header line to stand on: an
-    // empty one would read as the blank line that ends a block.
-    out.push({ text: restaurantName || NO_SCORE, id: null });
-    if (location) out.push({ text: location, id: null });
-    out.push(...lines);
-    if (date && date !== today) out.push({ text: formatDateLine(date, now), id: null });
-  }
-
   for (const rating of ratings) {
-    const date = rating.dateRated || '';
-    const key = `${rating.restaurantName || ''}\0${rating.location || ''}\0${date}`;
+    const key = `${rating.restaurantName || ''}\0${rating.location || ''}`;
     if (!block || key !== block.key) {
-      flush();
       block = {
         key,
         restaurantName: rating.restaurantName || '',
         location: rating.location || '',
-        date,
         lines: [],
       };
+      blocks.push(block);
       parentFood = '';
     }
 
@@ -438,10 +467,34 @@ export function generateTextLines(ratings, categories = [], { now = new Date() }
       notes,
     ].filter((part) => part !== '').join(' ');
 
-    block.lines.push({ text, id: rating.id });
+    const line = { text, id: rating.id };
+    block.lines.push(line);
+    written.push({ line, block, date: rating.dateRated || '' });
     if (!indent) parentFood = rating.specifier || '';
   }
-  flush();
+
+  // Ratings that share a date need only one date line, after the last of them —
+  // which is what reading them back expects, and how the list gets written by
+  // hand: one date under a run of restaurants eaten at the same day. The very
+  // last run says nothing when it's today, the date a new rating gets anyway.
+  written.forEach(({ line, block: owner, date }, i) => {
+    const isLast = i === written.length - 1;
+    if (!date || date === (isLast ? null : written[i + 1].date)) return;
+    if (isLast && date === today) return;
+    owner.lines.splice(owner.lines.indexOf(line) + 1, 0, { text: formatDateLine(date, now), id: null });
+  });
+
+  for (const { restaurantName, location, lines } of blocks) {
+    // A block with nothing in it writes nothing — that's the blank rating a new
+    // entry starts with, which shouldn't put a line in the box.
+    if (lines.length === 0 && !restaurantName && !location) continue;
+    if (out.length > 0) out.push({ text: '', id: null });
+    // A block with no restaurant still needs a header line to stand on: an
+    // empty one would read as the blank line that ends a block.
+    out.push({ text: restaurantName || NO_SCORE, id: null });
+    if (location) out.push({ text: location, id: null });
+    out.push(...lines);
+  }
 
   return out;
 }

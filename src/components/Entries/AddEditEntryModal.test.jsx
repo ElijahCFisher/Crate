@@ -254,19 +254,31 @@ describe('applyTextToForm', () => {
     expect(next).toMatchObject({ restaurantName: 'Zorba', location: 'Denver' });
   });
 
-  it('takes the date off a date line, for the rating and any new one under it', () => {
+  it('takes the date off a date line, for the rating above it and any new one', () => {
     const form = filledForm();
     const lines = baselineFor(form);
+    // The existing rating keeps the 1/1 written under it; the new line below
+    // that takes the date written under itself.
     const text = `${lines.map((l) => l.text).join('\n')}\nFries 5\n9/1/2025`;
 
     const { form: next } = applyTextToForm(form, text, categories, lines);
-    expect(next.dateRated).toBe('2025-09-01');
-    expect(next.dateRatedMs).toBe(new Date(2025, 8, 1).getTime());
+    expect(next.dateRated).toBe('2026-01-01');
     expect(next.additionalRatings[0]).toMatchObject({
       specifier: 'Fries',
       dateRated: '2025-09-01',
       dateRatedMs: new Date(2025, 8, 1).getTime(),
     });
+  });
+
+  it('re-dates every rating above a single date at the bottom', () => {
+    const form = filledForm([follower(1, null, { linkedFields: [], specifier: 'Fries', score: '5' })]);
+    const lines = baselineFor(form);
+    const text = 'Guess\nDenver\nGyro 8\nFries 5\n9/1/2025';
+
+    const { form: next } = applyTextToForm(form, text, categories, lines);
+    expect(next.dateRated).toBe('2025-09-01');
+    expect(next.dateRatedMs).toBe(new Date(2025, 8, 1).getTime());
+    expect(next.additionalRatings[0].dateRated).toBe('2025-09-01');
   });
 
   it('leaves the date alone when the text names none', () => {

@@ -361,6 +361,111 @@ describe('ratings that are missing a piece', () => {
   });
 });
 
+describe('which ratings a date line covers', () => {
+  const now = new Date(2026, 8, 16); // Sep 16, 2026
+  const cats = [
+    { uuid: 'c-cookie', restaurantName: 'cookie', ratingCategory: '' },
+    { uuid: 'c-ice-cream', restaurantName: 'ice cream', ratingCategory: '' },
+  ];
+  const dates = (text) => parseText(text, cats, { now }).ratings.map((r) => r.dateRated);
+
+  it('covers every restaurant above it when it stands alone at the bottom', () => {
+    const text = [
+      'Tiny Rino Treat House',
+      'Central Market, Denver',
+      'Warm grand cookie a la mode (caramel, fior di latte) 8 cookie',
+      '  4 ice cream',
+      '  9 cookie',
+      '',
+      'Izzio',
+      'Central Market, Denver',
+      'Lemon meringue tart 9',
+      'The crown - creme brulee 7',
+      '9/15',
+    ].join('\n');
+
+    const { ratings, errors } = parseText(text, cats, { now });
+    expect(errors).toEqual([]);
+    expect(ratings.map((r) => [r.restaurantName, r.specifier, r.score, r.dateRated])).toEqual([
+      ['Tiny Rino Treat House', 'Warm grand cookie a la mode (caramel, fior di latte)', '8', '2026-09-15'],
+      ['Tiny Rino Treat House', '', '4', '2026-09-15'],
+      ['Tiny Rino Treat House', '', '9', '2026-09-15'],
+      ['Izzio', 'Lemon meringue tart', '9', '2026-09-15'],
+      ['Izzio', 'The crown - creme brulee', '7', '2026-09-15'],
+    ]);
+  });
+
+  it('1. a date directly under one rating is that rating\'s alone', () => {
+    expect(dates('Z\nDenver\nGyro 8\n9/1\nFries 5\n9/2')).toEqual(['2026-09-01', '2026-09-02']);
+  });
+
+  it('2. a date under the group covers the ratings that have none of their own', () => {
+    expect(dates('Z\nDenver\nGyro 8\nFries 5\nBaklava 9\n9/1')).toEqual(['2026-09-01', '2026-09-01', '2026-09-01']);
+    // The one with its own date keeps it; the group's date covers the others.
+    expect(dates('Z\nDenver\nGyro 8\n9/1\nFries 5\nBaklava 9\n9/2')).toEqual(['2026-09-01', '2026-09-02', '2026-09-02']);
+  });
+
+  it('3. a date under the restaurant name covers that restaurant', () => {
+    expect(dates('Z\n9/1\nDenver\nGyro 8\nFries 5')).toEqual(['2026-09-01', '2026-09-01']);
+    // Still beaten by a date of the group's own, below.
+    expect(dates('Z\n9/1\nDenver\nGyro 8\n9/2')).toEqual(['2026-09-02']);
+  });
+
+  it('4. otherwise the nearest date below, wherever it is', () => {
+    const text = 'A\nGyro 8\n\nB\nPho 9\n9/1\n\nC\nTaco 7\n9/2';
+    expect(dates(text)).toEqual(['2026-09-01', '2026-09-01', '2026-09-02']);
+  });
+
+  it('5. a rating with no date below it keeps the date it already has', () => {
+    expect(dates('A\nGyro 8\n9/1\n\nB\nPho 9')).toEqual(['2026-09-01', '']);
+    expect(dates('A\nGyro 8\nFries 5')).toEqual(['', '']);
+  });
+
+  it('reads a date standing alone after a blank line as a date, not a restaurant', () => {
+    const { ratings, blocks } = parseText('A\nGyro 8\n\n9/1', cats, { now });
+    expect(ratings.map((r) => r.dateRated)).toEqual(['2026-09-01']);
+    expect(blocks).toHaveLength(1);
+  });
+
+  it('writes one date line under a run of restaurants sharing a date', () => {
+    const ratings = [
+      { id: 'a', restaurantName: 'Tiny Rino Treat House', location: 'Central Market, Denver', specifier: 'Cookie', score: '8', dateRated: '2026-09-15' },
+      { id: 'b', restaurantName: 'Izzio', location: 'Central Market, Denver', specifier: 'Tart', score: '9', dateRated: '2026-09-15' },
+    ];
+    expect(generateText(ratings, cats, { now })).toBe(
+      'Tiny Rino Treat House\nCentral Market, Denver\nCookie 8\n\nIzzio\nCentral Market, Denver\nTart 9\n9/15'
+    );
+  });
+
+  it('round-trips ratings dated on different days', () => {
+    const ratings = [
+      { id: 'a', restaurantName: 'A', specifier: 'Gyro', score: '8', dateRated: '2026-09-01' },
+      { id: 'b', restaurantName: 'A', specifier: 'Fries', score: '5', dateRated: '2026-09-02' },
+      { id: 'c', restaurantName: 'B', specifier: 'Pho', score: '9', dateRated: '2026-09-02' },
+    ];
+    const text = generateText(ratings, cats, { now });
+    expect(text).toBe('A\nGyro 8\n9/1\nFries 5\n\nB\nPho 9\n9/2');
+    expect(dates(text)).toEqual(['2026-09-01', '2026-09-02', '2026-09-02']);
+  });
+
+  it('leaves today unwritten only where nothing below could claim it', () => {
+    const lastIsToday = [
+      { id: 'a', restaurantName: 'A', specifier: 'Gyro', score: '8', dateRated: '2026-09-01' },
+      { id: 'b', restaurantName: 'A', specifier: 'Fries', score: '5', dateRated: '2026-09-16' },
+    ];
+    expect(generateText(lastIsToday, cats, { now })).toBe('A\nGyro 8\n9/1\nFries 5');
+    expect(dates(generateText(lastIsToday, cats, { now }))).toEqual(['2026-09-01', '']);
+
+    // Today first: leaving it out would let the 9/1 below claim it.
+    const todayFirst = [
+      { id: 'a', restaurantName: 'A', specifier: 'Gyro', score: '8', dateRated: '2026-09-16' },
+      { id: 'b', restaurantName: 'A', specifier: 'Fries', score: '5', dateRated: '2026-09-01' },
+    ];
+    expect(generateText(todayFirst, cats, { now })).toBe('A\nGyro 8\n9/16\nFries 5\n9/1');
+    expect(dates(generateText(todayFirst, cats, { now }))).toEqual(['2026-09-16', '2026-09-01']);
+  });
+});
+
 describe('date lines', () => {
   const now = new Date(2026, 8, 7); // Sep 7, 2026
 
@@ -417,13 +522,12 @@ describe('date lines', () => {
     expect(generateText(ratings, categories, { now })).toBe('Z\nGyro 8');
   });
 
-  it('splits a block when two ratings of one visit carry different dates', () => {
+  it('dates ratings of one restaurant separately, in the one block', () => {
     const ratings = [
       { id: 'a', restaurantName: 'Z', location: 'Denver', specifier: 'Gyro', score: '8', dateRated: '2026-09-01' },
       { id: 'b', restaurantName: 'Z', location: 'Denver', specifier: 'Fries', score: '5', dateRated: '2026-09-02' },
     ];
-    expect(generateText(ratings, categories, { now }))
-      .toBe('Z\nDenver\nGyro 8\n9/1\n\nZ\nDenver\nFries 5\n9/2');
+    expect(generateText(ratings, categories, { now })).toBe('Z\nDenver\nGyro 8\n9/1\nFries 5\n9/2');
   });
 
   it('round-trips a dated block', () => {
