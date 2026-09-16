@@ -147,10 +147,16 @@ export function useAuth() {
     onNonOAuthError,
   });
 
-  const signIn = useCallback(() => {
+  /**
+   * `forceConsent` is for signing in again after being kicked out: Google only
+   * hands back a refresh token when it shows the consent screen, so a silent
+   * re-auth can leave the session dying again as soon as the old refresh token
+   * is gone.
+   */
+  const signIn = useCallback(({ forceConsent = false } = {}) => {
     setIsSigningIn(true);
     setAuthError(null);
-    if (needsConsentReauth) {
+    if (needsConsentReauth || forceConsent) {
       loginWithConsent();
     } else {
       loginNormal();

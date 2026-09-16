@@ -7,8 +7,10 @@ import Typography from '@mui/material/Typography';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import WifiOffIcon from '@mui/icons-material/WifiOff';
+import CloudOffIcon from '@mui/icons-material/CloudOff';
 import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
+import { getLastTokenError } from '../../services/googleTokenService';
 
 /**
  * Returns true if the syncError string indicates an authentication failure
@@ -27,18 +29,33 @@ export default function SyncStatus({
   onClearError,
   onReauthenticate,
   isOffline,
+  offlineReason,
+  onRetryConnection,
   pendingCount,
 }) {
-  // Offline takes visual priority over the syncing spinner
+  // Not syncing takes visual priority over the syncing spinner. Two different
+  // things, said differently: the browser reporting no network, or a request
+  // failing while the browser says there is one — that one is only a guess, so
+  // it says what it actually knows and keeps retrying.
   if (isOffline) {
     const queued = pendingCount || 0;
-    const tip = queued > 0
-      ? `Offline — ${queued} unsaved change${queued !== 1 ? 's' : ''} will sync when back online`
-      : 'Offline — working from cache';
+    const unreachable = offlineReason !== 'browser';
+    const waiting = queued > 0
+      ? ` ${queued} unsaved change${queued !== 1 ? 's' : ''} will sync once it's back.`
+      : '';
+    const tip = unreachable
+      ? `Can't reach Google Drive — retrying.${waiting} Click to try now.`
+      : `Offline — working from cache.${waiting} Click to try now.`;
     return (
       <Tooltip title={tip}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'warning.light' }}>
-          <WifiOffIcon fontSize="small" />
+        <Box
+          onClick={onRetryConnection}
+          sx={{
+            display: 'flex', alignItems: 'center', gap: 0.5, color: 'warning.light',
+            cursor: onRetryConnection ? 'pointer' : 'default',
+          }}
+        >
+          {unreachable ? <CloudOffIcon fontSize="small" /> : <WifiOffIcon fontSize="small" />}
           {queued > 0 && (
             <Typography variant="caption" sx={{ fontWeight: 700, lineHeight: 1 }}>
               {queued}
@@ -61,9 +78,12 @@ export default function SyncStatus({
 
   if (syncError) {
     const isAuth = isAuthErrorMessage(syncError);
+    // Say why, when the Worker told us — "invalid_grant" means Google dropped
+    // the refresh token rather than anything having gone wrong here.
+    const reason = isAuth ? getLastTokenError() : null;
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', color: 'error.light' }}>
-        <Tooltip title={isAuth ? 'Session expired' : syncError}>
+        <Tooltip title={isAuth ? `Session expired${reason ? ` — ${reason}` : ''}` : syncError}>
           <ErrorIcon fontSize="small" />
         </Tooltip>
         {isAuth && onReauthenticate ? (

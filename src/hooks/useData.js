@@ -12,7 +12,7 @@ import {
   createModificationChange,
   createDeletionChange,
 } from '../utils/changelogUtils';
-import { DRIVE_FOLDER_NAME, DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME, DRIVE_PICTURES_FOLDER_NAME } from '../config';
+import { API_BASE, DRIVE_FOLDER_NAME, DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME, DRIVE_PICTURES_FOLDER_NAME } from '../config';
 import { makeToTryItem, TOTRY_TYPE } from '../utils/toTryUtils';
 
 // ── Offline persistence helpers ───────────────────────────────────────────────
@@ -74,6 +74,12 @@ function isNetworkError(err) {
   return err instanceof TypeError && err.message.toLowerCase().includes('fetch');
 }
 
+/** Sync errors that stop being true the moment the network comes back. */
+const NETWORK_MESSAGES = new Set([
+  'Working offline — showing cached data. Changes will sync when back online.',
+  'Network error — change saved locally and will sync when back online.',
+]);
+
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useData(isAuthenticated) {
@@ -88,6 +94,11 @@ export function useData(isAuthenticated) {
   const [syncError, setSyncError]   = useState(null);
   const [pendingCount, setPendingCount] = useState(() => loadQueue().length);
   const [isOffline, setIsOffline]   = useState(!navigator.onLine);
+  // Why we think we can't sync: 'browser' — the browser says there's no
+  // network; 'unreachable' — the browser says there is one but a request
+  // failed anyway. The second is a guess, so it gets retried and is never
+  // reported as being offline.
+  const [offlineReason, setOfflineReason] = useState(navigator.onLine ? '' : 'browser');
 
   const combinedFileIdRef  = useRef(null);
   const changelogFileIdRef = useRef(null);
@@ -113,6 +124,55 @@ export function useData(isAuthenticated) {
   useEffect(() => { combinedRef.current        = combined;        }, [combined]);
   useEffect(() => { changelogRef.current       = changelog;       }, [changelog]);
   useEffect(() => { isOfflineRef.current       = isOffline;       }, [isOffline]);
+
+  // ── Reachability ────────────────────────────────────────────────────────────
+
+  /** A request failed the way an unplugged network fails. */
+  function goOffline() {
+    setIsOffline(true);
+    setOfflineReason(navigator.onLine ? 'unreachable' : 'browser');
+  }
+
+  /** Something reached the network — stop saying we can't. */
+  function markOnline() {
+    setIsOffline(false);
+    setOfflineReason('');
+    setSyncError((current) => (current && NETWORK_MESSAGES.has(current) ? null : current));
+  }
+
+  /**
+   * Is anything out there? Any answer at all counts, including one that says
+   * we're signed out — this asks about the network, not the session. Deliberately
+   * the Worker's cheapest endpoint rather than a Drive read.
+   */
+  async function probeConnection() {
+    if (!navigator.onLine) return false;
+    try {
+      await fetch(`${API_BASE}/api/session`, { method: 'GET', credentials: 'include', cache: 'no-store' });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Back on the network: pick up where the sync left off. */
+  function resumeSync() {
+    markOnline();
+    const cid = combinedFileIdRef.current;
+    const lid = changelogFileIdRef.current;
+    if (cid && lid) {
+      // fileIds already set — went offline mid-session, just flush the queue.
+      flushQueue(cid, lid);
+    } else if (initRef.current) {
+      // Page was loaded while offline; init() never got a fileId.
+      initRef.current();
+    }
+  }
+
+  async function retryConnection() {
+    if (await probeConnection()) resumeSync();
+    else setOfflineReason(navigator.onLine ? 'unreachable' : 'browser');
+  }
 
   // ── Apply Drive result to local state ───────────────────────────────────────
 
@@ -192,7 +252,7 @@ export function useData(isAuthenticated) {
           if (myCount !== initCounterRef.current) return;
           if (!cmResult.ok) throw new Error('Migration failed (combined). Please refresh.');
           applyResult(migrated);
-          setIsOffline(false);
+          markOnline();
           if (loadQueue().length) flushQueue(combinedId, changelogId);
           return;
         }
@@ -223,7 +283,7 @@ export function useData(isAuthenticated) {
               throw new Error('Failed to seed Drive from cache.');
             }
             applyResult(cached);
-            setIsOffline(false);
+            markOnline();
             // The cache written to Drive already incorporates every queued op
             // (each offline op saves the cache before enqueuing). Clear the
             // queue so the ops aren't replayed and don't create duplicates.
@@ -262,7 +322,7 @@ export function useData(isAuthenticated) {
           }
         }
         applyResult(data);
-        setIsOffline(false);
+        markOnline();
         // Replay any Drive writes that were in-flight when the page last reloaded.
         if (wal.length > 0) {
           saveWal([]);
@@ -279,7 +339,7 @@ export function useData(isAuthenticated) {
         if (cached) {
           setCombined(new Map(cached.combined));
           setChangelog([...cached.changelog]);
-          setIsOffline(true);
+          goOffline();
           setSyncError('Working offline — showing cached data. Changes will sync when back online.');
         } else {
           setSyncError(err.message);
@@ -295,21 +355,11 @@ export function useData(isAuthenticated) {
   // ── Online / Offline events ─────────────────────────────────────────────────
 
   useEffect(() => {
-    function handleOnline() {
-      setIsOffline(false);
-      setSyncError(null);
-      const cid = combinedFileIdRef.current;
-      const lid = changelogFileIdRef.current;
-      if (cid && lid) {
-        // fileIds already set — went offline mid-session, just flush the queue.
-        flushQueue(cid, lid);
-      } else if (initRef.current) {
-        // Page was loaded while offline; init() never got a fileId.
-        // Re-run init now — it will load Drive data and flush the queue.
-        initRef.current();
-      }
+    function handleOnline() { resumeSync(); }
+    function handleOffline() {
+      setIsOffline(true);
+      setOfflineReason('browser');
     }
-    function handleOffline() { setIsOffline(true); }
     window.addEventListener('online',  handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
@@ -317,6 +367,48 @@ export function useData(isAuthenticated) {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  /**
+   * Keep trying while we can't sync. The browser's `online` event only fires
+   * when the browser itself thought it was offline — a request that failed on
+   * its own would otherwise leave the indicator stuck until a reload. Backs off
+   * to a minute, and checks straight away when the window is looked at again.
+   */
+  useEffect(() => {
+    if (!isOffline) return undefined;
+    const delays = [3000, 5000, 10_000, 20_000, 30_000, 60_000];
+    let cancelled = false;
+    let attempt = 0;
+    let timer = null;
+
+    async function tryAgain() {
+      if (cancelled) return;
+      if (await probeConnection()) {
+        if (!cancelled) resumeSync();
+        return;
+      }
+      if (cancelled) return;
+      setOfflineReason(navigator.onLine ? 'unreachable' : 'browser');
+      timer = setTimeout(tryAgain, delays[Math.min(attempt++, delays.length - 1)]);
+    }
+
+    function tryNow() {
+      clearTimeout(timer);
+      attempt = 0;
+      tryAgain();
+    }
+    function onVisible() { if (document.visibilityState === 'visible') tryNow(); }
+
+    timer = setTimeout(tryAgain, delays[0]);
+    window.addEventListener('focus', tryNow);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      window.removeEventListener('focus', tryNow);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isOffline]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Queue flush ─────────────────────────────────────────────────────────────
 
@@ -375,12 +467,13 @@ export function useData(isAuthenticated) {
     setSyncing(true); setSyncError(null);
     try {
       const result = await fn(fids);
+      markOnline(); // it went through, so whatever we thought before, we're on
       const fileData = result?.combined ? result : result?.data;
       if (fileData) applyResult(fileData);
       return result;
     } catch (err) {
       if (isNetworkError(err)) {
-        setIsOffline(true);
+        goOffline();
         if (localApply) localApply();
         if (queueOp) {
           enqueue(queueOp);
@@ -453,10 +546,11 @@ export function useData(isAuthenticated) {
       .then(() => {
         // Drive write succeeded — remove from WAL.
         if (walId) saveWal(loadWal().filter((o) => o._walId !== walId));
+        markOnline();
       })
       .catch((err) => {
         if (isNetworkError(err)) {
-          setIsOffline(true);
+          goOffline();
           // Move from WAL to persistent offline queue.
           if (walId) saveWal(loadWal().filter((o) => o._walId !== walId));
           if (queueOp) {
@@ -925,7 +1019,7 @@ export function useData(isAuthenticated) {
     combined, changelog, categories, foodEntries, toTryItems,
     clearLocalData, addToTryItems,
     fileId: combinedFileId, folderId, picturesFolderId, loading, syncing, syncError, setSyncError,
-    isOffline, pendingCount,
+    isOffline, offlineReason, retryConnection, pendingCount,
     addEntry, addEntryGroups, addEntriesWithLinks, addCategory, modifyEntry, deleteEntry,
     applyRebalance,
     importCsv, exportCsv,

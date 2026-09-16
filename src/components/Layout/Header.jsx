@@ -28,6 +28,8 @@ export default function Header({
   onClearError,
   onReauthenticate,
   isOffline,
+  offlineReason,
+  onRetryConnection,
   pendingCount,
   // nav
   onOpenExportImport,
@@ -71,6 +73,8 @@ export default function Header({
             onClearError={onClearError}
             onReauthenticate={onReauthenticate}
             isOffline={isOffline}
+            offlineReason={offlineReason}
+            onRetryConnection={onRetryConnection}
             pendingCount={pendingCount}
           />
         )}

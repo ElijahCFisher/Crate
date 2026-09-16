@@ -73,6 +73,8 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     importCsv,
     exportCsv,
     isOffline,
+    offlineReason,
+    retryConnection,
     pendingCount,
   } = data;
 
@@ -460,6 +462,8 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
         onReauthenticate={onReauthenticate}
         onOpenExportImport={() => setExportImportOpen(true)}
         isOffline={isOffline}
+        offlineReason={offlineReason}
+        onRetryConnection={retryConnection}
         pendingCount={pendingCount}
       />
 

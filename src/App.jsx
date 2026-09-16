@@ -9,7 +9,7 @@ export default function App() {
 
   function handleReauthenticate() {
     data.setSyncError(null);
-    auth.signIn();
+    auth.signIn({ forceConsent: true });
   }
 
   // Local data goes first: auth flipping to signed-out makes useData fall back

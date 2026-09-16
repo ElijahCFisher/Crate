@@ -13,6 +13,17 @@ import { API_BASE } from '../config';
 let accessToken = null;
 let expiresAt   = 0;
 let inflight    = null;   // deduplicates concurrent refresh calls
+let lastError   = null;   // why the last refresh failed, for the UI to report
+
+/**
+ * What the Worker said the last time it couldn't mint an access token.
+ * `invalid_grant` means Google threw the refresh token away — which is what
+ * happens every 7 days while an OAuth app is still in Testing, and what being
+ * asked to sign in again keeps meaning.
+ */
+export function getLastTokenError() {
+  return lastError;
+}
 
 function isUsable() {
   return !!accessToken && Date.now() < expiresAt - 60_000; // 60 s buffer
@@ -44,11 +55,14 @@ export async function getGoogleAccessToken({ forceRefresh = false } = {}) {
 
       if (!res.ok) {
         clearGoogleAccessToken();
+        lastError = data?.error ? `${data.error} (HTTP ${res.status})` : `HTTP ${res.status}`;
+        console.warn('[auth] the Worker could not mint a Google access token:', lastError);
         throw new Error(data?.error || `HTTP ${res.status}`);
       }
 
       accessToken = data.accessToken;
       expiresAt   = data.expiresAt || 0;
+      lastError   = null;
       return accessToken;
     })
     .finally(() => {
