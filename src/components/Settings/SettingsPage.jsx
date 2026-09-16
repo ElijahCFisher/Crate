@@ -14,6 +14,7 @@ import ViewSidebarIcon from '@mui/icons-material/ViewSidebar';
 import TabIcon from '@mui/icons-material/Tab';
 import { useThemeMode } from '../../theme';
 import { useDevicePreference, TAB_POSITION_KEY, TAB_POSITIONS } from '../../hooks/useDevicePreference';
+import { AUTO_LOCATION_KEY, AUTO_LOCATION_VALUES } from '../../hooks/useAutoLocation';
 
 export default function SettingsPage({
   showAdvancedByDefault,
@@ -23,6 +24,7 @@ export default function SettingsPage({
 }) {
   const { mode, setMode } = useThemeMode();
   const [tabPosition, setTabPosition] = useDevicePreference(TAB_POSITION_KEY, 'side', TAB_POSITIONS);
+  const [autoLocation, setAutoLocation] = useDevicePreference(AUTO_LOCATION_KEY, 'on', AUTO_LOCATION_VALUES);
 
   return (
     <Box>
@@ -71,6 +73,20 @@ export default function SettingsPage({
         }
         label="Show advanced fields by default when adding entries"
       />
+      <FormControlLabel
+        control={
+          <Switch
+            checked={autoLocation === 'on'}
+            onChange={(e) => setAutoLocation(e.target.checked ? 'on' : 'off')}
+          />
+        }
+        label="Fill in the location from where this device is"
+      />
+      <Typography variant="caption" color="text.secondary" display="block" sx={{ maxWidth: 560 }}>
+        New ratings with no location get the nearest branch of the restaurant you name, or where it was
+        last rated, or where you are. Your coordinates are sent to OpenStreetMap to name the place and
+        aren&apos;t stored. A location you type is never replaced. Saved per device.
+      </Typography>
 
       {onUpdateSearchVocabulary && (
         <>

@@ -26,6 +26,7 @@ import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import ClearIcon from '@mui/icons-material/Clear';
 import LinkIcon from '@mui/icons-material/Link';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
+import PlaceIcon from '@mui/icons-material/Place';
 import { CategorySelect } from '../Categories/CategorySelector';
 import { uploadPhoto, findFileInFolder } from '../../services/driveService';
 import DriveImage from '../DriveImage';
@@ -34,9 +35,11 @@ import { msToDateInput, dateInputToMs } from '../../utils/dateUtils';
 import { evalAdditionalInfo, hasExpressions } from '../../utils/mathUtils';
 import { LINKABLE_FIELDS } from '../../utils/linkUtils';
 import { convertBetweenScales, roundToValidScore } from '../../utils/scaleUtils';
+import { useDevicePreference } from '../../hooks/useDevicePreference';
+import { useAutoLocation, AUTO_LOCATION_KEY, AUTO_LOCATION_VALUES } from '../../hooks/useAutoLocation';
 import { parseText, generateTextLines, alignLines } from '../../utils/textModeUtils';
 import {
-  buildRestaurantLocations, locationsForRestaurant, orderLocationSuggestions,
+  buildRestaurantLocations, orderLocationSuggestions,
 } from '../../utils/restaurantLocations';
 import {
   LABEL_RESTAURANT, LABEL_FOOD_NAME, LABEL_RATING, LABEL_CATEGORY,
@@ -240,6 +243,35 @@ export function applyLinkedChange(form, sourceId, field, patch, { userEdit = tru
   }
 
   return next;
+}
+
+/**
+ * Fill in guessed locations on a form. Only ratings being created get one —
+ * never a saved entry being edited — and only where the location is empty or
+ * still holds the last guess made for it, so anything you typed, in the form
+ * or the text box, stays. Returns the form and the updated record of guesses.
+ *
+ * `suggestFor(restaurantName)` gives the current best guess ('' for none yet).
+ */
+export function applyAutoLocations(form, suggestFor, lastAuto, { isEdit = false } = {}) {
+  let next = form;
+  const guesses = new Map(lastAuto);
+
+  const candidates = [];
+  if (!isEdit) candidates.push({ id: 'primary', restaurantName: form.restaurantName, location: form.location });
+  for (const r of form.additionalRatings) {
+    if (!r.originalUuid) candidates.push({ id: r.id, restaurantName: r.restaurantName, location: r.location });
+  }
+
+  for (const { id, restaurantName, location } of candidates) {
+    const current = String(location ?? '');
+    if (current !== '' && current !== guesses.get(id)) continue;
+    const guess = suggestFor(restaurantName || '');
+    if (!guess || guess === current) continue;
+    next = applyLinkedChange(next, id, 'location', { location: guess }, { userEdit: false });
+    guesses.set(id, guess);
+  }
+  return { form: next, lastAuto: guesses };
 }
 
 function readScoreAndCategory(form, id) {
@@ -656,6 +688,26 @@ export default function AddEditEntryModal({
     [...new Set(foodEntries.map((e) => e.location).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [foodEntries]);
   const restaurantLocations = useMemo(() => buildRestaurantLocations(foodEntries), [foodEntries]);
+
+  // ── Location guesses ──────────────────────────────────────────────────────
+  // Every rating being created with no location gets one: the nearest branch
+  // of the restaurant named, else where it was last rated, else where you are.
+  // `lastGuessRef` remembers what was guessed per rating, which is how a guess
+  // is told apart from something you typed — only guesses get replaced.
+  const [autoLocationPref] = useDevicePreference(AUTO_LOCATION_KEY, 'on', AUTO_LOCATION_VALUES);
+  const autoLocation = useAutoLocation({
+    open,
+    enabled: autoLocationPref === 'on',
+    knownLocations: locationSuggestions,
+    restaurantLocations,
+  });
+  const lastGuessRef = useRef(new Map());
+
+  function fillGuessedLocations(target) {
+    const result = applyAutoLocations(target, autoLocation.suggestFor, lastGuessRef.current, { isEdit });
+    lastGuessRef.current = result.lastAuto;
+    return result.form;
+  }
   const categoriesMap = useMemo(() => new Map(categories.map((c) => [c.uuid, c])), [categories]);
 
   const [form, setForm] = useState(entryToForm(null));
@@ -689,6 +741,7 @@ export default function AddEditEntryModal({
       setTextErrors([]);
       setTextWarnings([]);
       textDirtyRef.current = false;
+      lastGuessRef.current = new Map();
       setFormKey((k) => k + 1);
       if (!entry && initialEntries && initialEntries.length > 0) {
         setForm(entriesToForm(initialEntries));
@@ -699,6 +752,23 @@ export default function AddEditEntryModal({
       }
     }
   }, [open, entry, initialEntries, prefill, showAdvancedByDefault]);
+
+  // Once typing settles, look up branches for the restaurants named and fill
+  // in guesses; again whenever a lookup lands. Returns the same form when
+  // there's nothing to change, so this doesn't loop.
+  const newRestaurantNames = [
+    ...(isEdit ? [] : [form.restaurantName]),
+    ...form.additionalRatings.filter((r) => !r.originalUuid).map((r) => r.restaurantName),
+  ].filter(Boolean);
+  const newNamesKey = JSON.stringify(newRestaurantNames);
+  useEffect(() => {
+    if (!open) return undefined;
+    const timer = setTimeout(() => {
+      autoLocation.request(JSON.parse(newNamesKey));
+      setForm((f) => fillGuessedLocations(f));
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [open, form, newNamesKey, autoLocation.suggestFor, autoLocation.request]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function setShared(field, value) {
     setForm((f) => applyLinkedChange(f, 'primary', field, { [field]: value }));
@@ -963,8 +1033,12 @@ export default function AddEditEntryModal({
     textDirtyRef.current = false;
     setTextErrors(result.errors);
     setTextWarnings(result.warnings);
-    setForm(result.form);
-    return result.form;
+    // A block with no location line reads as an empty location, which would
+    // wipe a guess already made — so guesses go straight back on here, where a
+    // save can see them, not after the next render.
+    const withGuesses = fillGuessedLocations(result.form);
+    setForm(withGuesses);
+    return withGuesses;
   }
 
   function handleModeChange(nextMode) {
@@ -1007,6 +1081,14 @@ export default function AddEditEntryModal({
           above it: the one rating it sits under, the whole restaurant when it closes one, or every
           restaurant above it that hasn't said otherwise.
         </Typography>
+        {autoLocationPref === 'on' && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <PlaceIcon sx={{ fontSize: '0.9rem' }} />
+            {autoLocation.here
+              ? `A new restaurant with no location line gets the nearest branch, or where you are (${autoLocation.here}).`
+              : 'A new restaurant with no location line gets its nearest branch, or where you are, once your location is known.'}
+          </Typography>
+        )}
         {textErrors.length > 0 && (
           <Alert severity="warning" sx={{ mt: 1.5 }}>
             {textErrors.map((err) => (
@@ -1030,7 +1112,8 @@ export default function AddEditEntryModal({
   function handleSubmit(e) {
     e.preventDefault();
     // Text edits are folded in first, so both tabs save the same thing.
-    const form = commitText();
+    // Guesses too, in case a restaurant was named less than a moment ago.
+    const form = fillGuessedLocations(commitText());
 
     // Resolve a pending new-category name to a UUID, deduped by lowercase name.
     const newCatCache = new Map();
@@ -1231,11 +1314,6 @@ export default function AddEditEntryModal({
    * recent visit there. Only when the location field is on screen — a guess
    * nobody can see shouldn't get saved.
    */
-  function autofillLocation(values, onChange, restaurantName = values.restaurantName) {
-    if (!(isEdit || showAdvanced) || String(values.location ?? '').trim()) return;
-    const [mostRecent] = locationsForRestaurant(restaurantLocations, restaurantName);
-    if (mostRecent) onChange('location', mostRecent);
-  }
 
   function renderSimpleSharedFields(values, onChange, autoFocusFirst = false, ownerId = 'primary') {
     return (
@@ -1249,10 +1327,6 @@ export default function AddEditEntryModal({
               highlightedSuggestionsRef.current.restaurantName = '';
               onChange('restaurantName', v);
             }}
-            onChange={(_, v, reason) => {
-              if (reason === 'selectOption' && typeof v === 'string') autofillLocation(values, onChange, v);
-            }}
-            onBlur={() => autofillLocation(values, onChange)}
             {...suggestionCommitProps('restaurantName', onChange)}
             renderInput={(params) => (
               <TextField {...params}
@@ -1542,6 +1616,14 @@ export default function AddEditEntryModal({
                 >
                   {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
                 </Button>
+                {/* The location lives in the advanced fields; a guess made while
+                    they're hidden is still shown, so nothing is saved unseen. */}
+                {!showAdvanced && form.location && lastGuessRef.current.get('primary') === form.location && (
+                  <Typography variant="caption" color="text.secondary" sx={{ ml: 1.5, display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                    <PlaceIcon sx={{ fontSize: '0.9rem' }} />
+                    {form.location}
+                  </Typography>
+                )}
               </Grid>
             )}
 
