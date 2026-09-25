@@ -65,11 +65,9 @@ first. (Shipped items live in the git log, not here.)
   whether `/logout` actually revokes the session lives in the `crate-server`
   Worker, which isn't in this repo.
 
-- **The MCP server doesn't know about search aliases/places or To Try.**
+- **The MCP server doesn't know about search aliases/places.**
   `applyFilters` takes the vocabulary as an option; the MCP search tool could
-  read `searchVocabulary` from `SettingsEtc.json` and pass it through. To-try
-  items (Entry Type `totry`) are invisible to it; tools to list/add them would
-  follow the ratings tools.
+  read `searchVocabulary` from `SettingsEtc.json` and pass it through.
 
 - **Tests.** There's a Vitest suite (360+ tests) covering the filter engine, text
   mode, CSV/import, scales and the entry form's pure logic. What's missing is

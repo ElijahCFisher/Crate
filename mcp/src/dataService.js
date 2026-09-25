@@ -151,6 +151,19 @@ export async function addBulkRating(fileIds, settingsFileId, groups) {
   return { builtGroups, bulkAdds };
 }
 
+/**
+ * Add entries in one Drive write with no linking between them — for to-try
+ * items, which unlike a batch of ratings aren't one visit.
+ */
+export async function addUnlinkedEntries(fileIds, entryDataArray) {
+  const entries = entryDataArray.map((d) => ({ ...ENTRY_DEFAULTS, uuid: uuidv4(), dateRated: Date.now(), ...d }));
+  const changes = entries.map((e) => createAdditionChange(e, CHANGE_METHOD));
+  return applyChanges(fileIds, changes, (data) => {
+    for (const e of entries) data.combined.set(e.uuid, e);
+    return { entries };
+  });
+}
+
 export async function modifyEntry(fileIds, entryUuid, updates) {
   const now = Date.now();
   const changes = Object.entries(updates).map(([field, value]) =>

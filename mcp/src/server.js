@@ -8,6 +8,7 @@ import * as settingsService from './settingsService.js';
 import { DRIVE_FOLDER_NAME, DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME } from './config.js';
 import { roundToValidScore, VALID_SCORES } from '../../src/utils/scaleUtils.js';
 import { applyFilters } from '../../src/utils/filterLogic.js';
+import { TOTRY_TYPE, findSimilarItems, makeToTryItem, statusOf } from '../../src/utils/toTryUtils.js';
 
 // ── Drive file-id resolution (cached per process) ───────────────────────────
 
@@ -37,6 +38,10 @@ function errorResult(err) {
 
 function foodEntries(combined) {
   return Array.from(combined.values()).filter((e) => e.entryType === 'food');
+}
+
+function toTryEntries(combined) {
+  return Array.from(combined.values()).filter((e) => e.entryType === TOTRY_TYPE);
 }
 
 function categoryEntries(combined) {
@@ -107,12 +112,17 @@ function summarizeEntry(entry, combined) {
   };
 }
 
-/** Resolve a human-typed category name to a uuid. Returns {uuid} or {error, candidates}. */
+/**
+ * Resolve a human-typed category to a uuid: a name ("Coffee"), or a path when
+ * names repeat — the end of one is enough ("Sandwich > Chicken", "Main/Chicken").
+ * Returns {uuid} or {error, candidates}.
+ */
 function resolveCategory(categoryName, combined) {
-  const needle = categoryName.trim().toLowerCase();
-  const matches = categoryEntries(combined).filter(
-    (c) => c.restaurantName.trim().toLowerCase() === needle
-  );
+  const segments = categoryName.split(/\s*(?:>|\/)\s*/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const matches = categoryEntries(combined).filter((c) => {
+    const path = categoryPath(c.uuid, combined).split(' / ').map((s) => s.trim().toLowerCase());
+    return segments.length > 0 && segments.every((seg, i) => path[path.length - segments.length + i] === seg);
+  });
   if (matches.length === 1) return { uuid: matches[0].uuid };
   if (matches.length === 0) return { error: `No category named "${categoryName}" found.` };
   return {
@@ -329,6 +339,130 @@ server.registerTool(
       const fileIds = await getFileIds();
       await dataService.deleteEntry(fileIds, uuid);
       return text({ deleted: uuid });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+
+function summarizeToTry(item, combined) {
+  return {
+    uuid: item.uuid,
+    restaurantName: item.restaurantName || undefined,
+    food: item.specifier || undefined,
+    location: item.location || undefined,
+    category: item.ratingCategory ? categoryPath(item.ratingCategory, combined) : undefined,
+    tags: item.tags?.length ? item.tags : undefined,
+    notes: item.additionalInfo || undefined,
+    status: statusOf(item),
+    triedRatings: item.triedRatings?.length ? item.triedRatings : undefined,
+    addedAt: item.dateRated ? new Date(item.dateRated).toISOString() : undefined,
+  };
+}
+
+server.registerTool(
+  'list_to_try',
+  {
+    title: 'List To Try items',
+    description: 'List items on the To Try tab — places and foods to get to. Filter by status, and/or by a case-insensitive substring matched against place/brand, food, location, category, tags and notes.',
+    inputSchema: {
+      status: z.enum(['open', 'tried', 'gone', 'all']).optional().default('all'),
+      search: z.string().optional(),
+      limit: z.number().int().positive().max(1000).default(200),
+    },
+  },
+  async ({ status, search, limit }) => {
+    try {
+      const fileIds = await getFileIds();
+      const combined = await dataService.readCombined(fileIds);
+      const needle = (search || '').trim().toLowerCase();
+      const results = toTryEntries(combined)
+        .filter((item) => status === 'all' || statusOf(item) === status)
+        .map((item) => summarizeToTry(item, combined))
+        .filter((s) => !needle || [s.restaurantName, s.food, s.location, s.category, s.notes, ...(s.tags || [])]
+          .some((v) => String(v || '').toLowerCase().includes(needle)));
+      return text({ total: results.length, returned: Math.min(limit, results.length), items: results.slice(0, limit) });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+
+const toTryInput = {
+  restaurantName: z.string().optional().describe('The place, chain or brand ("Big Sky Burger", "Dutch Bros"). Leave out for a food with no particular place ("Elote").'),
+  food: z.string().optional().describe('A specific food or dish ("challah french toast"). Leave out when the item is the whole place.'),
+  location: z.string().optional().describe("Where it is, written like your ratings' locations (\"Denver\", \"Larimer, Denver\", \"CS\"). Leave out for chains and grocery items."),
+  category: z.string().optional().describe('An existing category name, or the end of its path when names repeat ("Sandwich > Hamburger").'),
+  categoryUuid: z.string().optional(),
+  tags: z.array(z.string()).optional().describe("Free-form tags — who to go with, \"DoorDash\", \"Goldbelly\", a cuisine that isn't a category."),
+  notes: z.string().optional().describe('Hours, who recommended it, links, what to order.'),
+  status: z.enum(['open', 'tried', 'gone']).optional().default('open').describe("\"gone\" for things that can't be had anymore (limited time)."),
+  dateAdded: z.string().optional().describe(`${DATE_INPUT_HELP} Defaults to now.`),
+};
+
+server.registerTool(
+  'add_to_try',
+  {
+    title: 'Add To Try items',
+    description: "Add places and foods to the To Try tab, many at once, in a single Drive write. Each item needs a restaurantName or a food (or both). Everything is checked before anything is written: if any item has a problem (e.g. an unknown category), nothing is added and the problems are listed. Items that look like one already on the list (same place and food, allowing a small typo) are skipped and reported unless allowDuplicates is true. Returns the number added and their uuids, not the items themselves — call list_to_try to see them. To change or remove an item afterwards, use update_rating / delete_rating with its uuid; status and tags go in update_rating's \"fields\" (e.g. {\"status\": \"tried\"}, {\"tags\": [\"DoorDash\"]}).",
+    inputSchema: {
+      items: z.array(z.object(toTryInput)).min(1).max(500),
+      allowDuplicates: z.boolean().optional().default(false),
+    },
+  },
+  async ({ items, allowDuplicates }) => {
+    try {
+      const fileIds = await getFileIds();
+      const combined = await dataService.readCombined(fileIds);
+
+      const problems = [];
+      const built = items.map((item, index) => {
+        const restaurantName = (item.restaurantName || '').trim();
+        const specifier = (item.food || '').trim();
+        if (!restaurantName && !specifier) problems.push({ index, error: 'Needs a restaurantName or a food.' });
+        let ratingCategory = item.categoryUuid || '';
+        if (!ratingCategory && item.category) {
+          const resolved = resolveCategory(item.category, combined);
+          if (resolved.error) problems.push({ index, ...resolved });
+          else ratingCategory = resolved.uuid;
+        }
+        if (ratingCategory && !combined.has(ratingCategory)) problems.push({ index, error: `categoryUuid ${ratingCategory} does not exist.` });
+        return makeToTryItem({
+          restaurantName,
+          specifier,
+          location: (item.location || '').trim(),
+          ratingCategory,
+          categories: ratingCategory && combined.has(ratingCategory) ? dataService.computeCategories(ratingCategory, combined) : [],
+          additionalInfo: (item.notes || '').trim(),
+          tags: [...new Set((item.tags || []).map((t) => t.trim()).filter(Boolean))],
+          status: item.status === 'open' ? '' : item.status,
+          dateRated: item.dateAdded ? parseDateTimeInput(item.dateAdded) : Date.now(),
+        });
+      });
+      if (problems.length) {
+        return errorResult(new Error(JSON.stringify({ message: 'Nothing was added — fix these and retry.', problems })));
+      }
+
+      // Against what's saved and against earlier items in this same call.
+      const existing = toTryEntries(combined);
+      const toAdd = [];
+      const skipped = [];
+      built.forEach((item, index) => {
+        const match = allowDuplicates ? null : findSimilarItems([...existing, ...toAdd], item)[0];
+        if (match) skipped.push({ index, restaurantName: item.restaurantName, food: item.specifier || undefined, alreadyOnList: summarizeToTry(match, combined) });
+        else toAdd.push(item);
+      });
+
+      const { entries } = toAdd.length
+        ? await dataService.addUnlinkedEntries(fileIds, toAdd)
+        : { entries: [] };
+      // Just the count and uuids: echoing hundreds of items back is bigger
+      // than the call that made them.
+      return text({
+        added: entries.length,
+        skipped,
+        addedUuids: entries.map((e) => e.uuid),
+      });
     } catch (err) {
       return errorResult(err);
     }

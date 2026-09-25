@@ -55,6 +55,8 @@ Add to your MCP config (`claude mcp add`, or edit `.mcp.json` /
 - `add_rating` — dataService.addBulkRating as-is, same `groups: Array<Array<entry>>` shape: entries within a group get `identicals` set to each other (same dish rated again — Rerate); separate groups aren't linked to each other (different dishes — "add another item from this visit"), but every entry across every group in the call is still recorded as one Bulk Adds entry.
 - `update_rating` — dataService.modifyEntry as-is: named parameters for the common fields (with category-name resolution and score-snapping conveniences), plus a raw `fields` passthrough for anything else (e.g. `picture`) — same generic behavior as calling modifyEntry directly.
 - `delete_rating` — delete by uuid, requires `confirm: true`.
+- `list_to_try` — items on the To Try tab, filtered by status and/or a substring.
+- `add_to_try` — add many To Try items in one Drive write (place/brand and/or food, location, category by name or path, tags, notes, status). All items are validated before anything is written; ones that look like an existing item are skipped and reported unless `allowDuplicates`. Edit or remove them afterwards with `update_rating` / `delete_rating` (status and tags via `fields`).
 
 ## How it works
 
