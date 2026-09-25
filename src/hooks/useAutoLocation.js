@@ -1,47 +1,66 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getDevicePosition, reverseGeocode, searchPlacesNear } from '../services/geoService';
-import { chooseAutoLocation, nameLocation, nearestPlace } from '../utils/locationGuess';
+import { chooseAutoLocation, formatCoords, nameLocation, nearestPlace } from '../utils/locationGuess';
 import { locationsForRestaurant } from '../utils/restaurantLocations';
 
 export const AUTO_LOCATION_KEY = 'crate_auto_location';
 export const AUTO_LOCATION_VALUES = ['on', 'off'];
 
 /**
- * Location guesses for the entry dialog while it's open.
+ * Location guesses for the entry dialog while it's open. Each guess is
+ * { location, coordinates } — the name to show and the point to record.
  *
- * On open it asks for the device's position and names it ("where you are").
+ * `auto` decides whether the dialog fills anything in by itself. That's what a
+ * phone is for; at a computer you're rarely where the food was, so nothing is
+ * looked up and nothing is guessed until `locate()` is called from the dialog's
+ * location button.
+ *
  * `request(names)` looks up the nearest branch of each named restaurant; call
  * it once names have stopped changing. `suggestFor(name)` is synchronous and
  * returns the best guess known right now — so it can be used at save time —
  * and `version` bumps whenever a lookup lands, so callers can re-apply.
  */
-export function useAutoLocation({ open, enabled, knownLocations, restaurantLocations }) {
-  const [here, setHere] = useState('');
+export function useAutoLocation({ open, enabled, auto = true, knownLocations, restaurantLocations }) {
+  const [here, setHere] = useState(null);
   const [position, setPosition] = useState(null);
   const [version, setVersion] = useState(0);
-  const branchesRef = useRef(new Map()); // lowercased name → location string, '' when none nearby
+  const branchesRef = useRef(new Map()); // lowercased name → guess, null when none nearby
   const requestedRef = useRef(new Set());
   const knownRef = useRef(knownLocations);
   knownRef.current = knownLocations;
 
-  useEffect(() => {
-    if (!open || !enabled) return undefined;
-    let cancelled = false;
-    (async () => {
+  /**
+   * Where the device is: its coordinates, named through OpenStreetMap. The
+   * name is what you'd write, and the coordinates are recorded as well, so a
+   * failed or nameless lookup still leaves the point itself.
+   */
+  const locate = useCallback(async () => {
+    if (!enabled) return null;
+    try {
+      const pos = await getDevicePosition();
+      setPosition(pos);
+      const coordinates = formatCoords(pos.lat, pos.lon);
+      let name = '';
       try {
-        const pos = await getDevicePosition();
-        if (cancelled) return;
-        setPosition(pos);
         const address = await reverseGeocode(pos.lat, pos.lon);
-        if (cancelled) return;
-        setHere(nameLocation(address, knownRef.current));
+        name = nameLocation(address, knownRef.current);
       } catch (err) {
-        // Permission refused, no GPS, or OSM unreachable: just no guess.
-        if (err?.code !== 1) console.info('[location] no device location guess:', err?.message || err);
+        console.info('[location] could not name where you are:', err?.message || err);
       }
-    })();
-    return () => { cancelled = true; };
-  }, [open, enabled]);
+      const guess = { location: name || coordinates, coordinates };
+      setHere(guess);
+      return guess;
+    } catch (err) {
+      // Permission refused, no GPS, or OSM unreachable: just no guess.
+      if (err?.code !== 1) console.info('[location] no device location guess:', err?.message || err);
+      return null;
+    }
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!open || !enabled || !auto) return;
+    locate();
+  }, [open, enabled, auto, locate]);
 
   const request = useCallback((names) => {
     if (!enabled || !position) return;
@@ -53,22 +72,26 @@ export function useAutoLocation({ open, enabled, knownLocations, restaurantLocat
       searchPlacesNear(name, position.lat, position.lon)
         .then((results) => {
           const nearest = nearestPlace(results, position.lat, position.lon);
-          branchesRef.current.set(key, nearest ? nameLocation(nearest.address, knownRef.current) : '');
+          branchesRef.current.set(key, nearest ? {
+            location: nameLocation(nearest.address, knownRef.current),
+            coordinates: formatCoords(nearest.lat, nearest.lon),
+          } : null);
         })
-        .catch(() => branchesRef.current.set(key, ''))
+        .catch(() => branchesRef.current.set(key, null))
         .finally(() => setVersion((v) => v + 1));
     }
   }, [enabled, position]);
 
   const suggestFor = useCallback((restaurantName) => {
-    if (!enabled) return '';
+    if (!enabled || !auto) return null;
     const key = String(restaurantName || '').trim().toLowerCase();
+    const lastVisit = key ? locationsForRestaurant(restaurantLocations, restaurantName)[0] || '' : '';
     return chooseAutoLocation({
-      branch: key ? branchesRef.current.get(key) || '' : '',
-      history: key ? locationsForRestaurant(restaurantLocations, restaurantName)[0] || '' : '',
+      branch: key ? branchesRef.current.get(key) || null : null,
+      history: lastVisit ? { location: lastVisit, coordinates: '' } : null,
       here,
     });
-  }, [enabled, here, restaurantLocations, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, auto, here, restaurantLocations, version]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { here, ready: !!position, request, suggestFor, version };
+  return { here, ready: !!position, locate, request, suggestFor, version };
 }

@@ -14,6 +14,9 @@ import Divider from '@mui/material/Divider';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import MyLocationIcon from '@mui/icons-material/MyLocation';
+import CloseIcon from '@mui/icons-material/Close';
 import Box from '@mui/material/Box';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
@@ -83,6 +86,7 @@ const SHARED_DEFAULTS = {
   restaurantName: '',
   specifier: '',
   location: '',
+  coordinates: '',
   dateRated: '',
   additionalInfo: '',
   picture: '',
@@ -101,6 +105,7 @@ function entryToForm(entry) {
     restaurantName: entry.restaurantName || '',
     specifier: entry.specifier || '',
     location: entry.location || '',
+    coordinates: entry.coordinates || '',
     dateRated: msToDateInput(entry.dateRated),
     additionalInfo: entry.additionalInfo || '',
     picture: entry.picture || '',
@@ -158,7 +163,7 @@ function sameStringArray(a, b) {
 function computeDiff(original, formShared, primaryRating) {
   const updates = {};
 
-  for (const field of ['restaurantName', 'specifier', 'location', 'additionalInfo', 'picture']) {
+  for (const field of ['restaurantName', 'specifier', 'location', 'coordinates', 'additionalInfo', 'picture']) {
     const fv = formShared[field] || '';
     const ov = original[field] || '';
     if (fv !== ov) updates[field] = fv;
@@ -249,11 +254,16 @@ export function applyLinkedChange(form, sourceId, field, patch, { userEdit = tru
  * Fill in guessed locations on a form. Only ratings being created get one —
  * never a saved entry being edited — and only where the location is empty or
  * still holds the last guess made for it, so anything you typed, in the form
- * or the text box, stays. Returns the form and the updated record of guesses.
+ * or the text box, stays. A rating whose id is in `dismissed` is left alone
+ * outright: emptying the field in the form is how you say you don't want one,
+ * and a guess coming straight back would make the X useless. (Text mode blanks
+ * locations of its own accord, which is why an empty field isn't enough on its
+ * own to mean that.) Returns the form and the updated record of guesses.
  *
- * `suggestFor(restaurantName)` gives the current best guess ('' for none yet).
+ * `suggestFor(restaurantName)` gives the current best guess as
+ * { location, coordinates }, or null for none yet.
  */
-export function applyAutoLocations(form, suggestFor, lastAuto, { isEdit = false } = {}) {
+export function applyAutoLocations(form, suggestFor, lastAuto, { isEdit = false, dismissed = new Set() } = {}) {
   let next = form;
   const guesses = new Map(lastAuto);
 
@@ -264,12 +274,16 @@ export function applyAutoLocations(form, suggestFor, lastAuto, { isEdit = false 
   }
 
   for (const { id, restaurantName, location } of candidates) {
+    if (dismissed.has(id)) continue;
     const current = String(location ?? '');
     if (current !== '' && current !== guesses.get(id)) continue;
     const guess = suggestFor(restaurantName || '');
-    if (!guess || guess === current) continue;
-    next = applyLinkedChange(next, id, 'location', { location: guess }, { userEdit: false });
-    guesses.set(id, guess);
+    if (!guess?.location || guess.location === current) continue;
+    next = applyLinkedChange(next, id, 'location', {
+      location: guess.location,
+      coordinates: guess.coordinates || '',
+    }, { userEdit: false });
+    guesses.set(id, guess.location);
   }
   return { form: next, lastAuto: guesses };
 }
@@ -348,6 +362,7 @@ function getPrimarySource(form) {
     restaurantName: form.restaurantName,
     specifier: form.specifier,
     location: form.location,
+    coordinates: form.coordinates,
     dateRated: form.dateRated,
     dateRatedMs: form.dateRatedMs ?? null,
     additionalInfo: form.additionalInfo,
@@ -369,6 +384,7 @@ function makeAdditionalRating(source, linkParentId = null) {
     restaurantName: source.restaurantName ?? '',
     specifier: source.specifier ?? '',
     location: source.location ?? '',
+    coordinates: source.coordinates ?? '',
     dateRated: source.dateRated ?? '',
     dateRatedMs: source.dateRatedMs ?? null,
     additionalInfo: source.additionalInfo ?? '',
@@ -389,6 +405,7 @@ function makeIdenticalRating(source, groupId, linkParentId = null) {
     restaurantName: source.restaurantName ?? '',
     specifier: source.specifier ?? '',
     location: source.location ?? '',
+    coordinates: source.coordinates ?? '',
     dateRated: source.dateRated ?? '',
     dateRatedMs: source.dateRatedMs ?? null,
     additionalInfo: source.additionalInfo ?? '',
@@ -430,6 +447,7 @@ function entriesToForm(entries) {
     restaurantName: primaryEntry.restaurantName || '',
     specifier: primaryEntry.specifier || '',
     location: primaryEntry.location || '',
+    coordinates: primaryEntry.coordinates || '',
     dateRated: msToDateInput(primaryEntry.dateRated),
     dateRatedMs: primaryEntry.dateRated ?? Date.now(),
     additionalInfo: primaryEntry.additionalInfo || '',
@@ -456,6 +474,7 @@ function entriesToForm(entries) {
       restaurantName: e.restaurantName || '',
       specifier: e.specifier || '',
       location: e.location || '',
+      coordinates: e.coordinates || '',
       dateRated: msToDateInput(e.dateRated),
       dateRatedMs: e.dateRated ?? Date.now(),
       additionalInfo: e.additionalInfo || '',
@@ -694,19 +713,62 @@ export default function AddEditEntryModal({
   // of the restaurant named, else where it was last rated, else where you are.
   // `lastGuessRef` remembers what was guessed per rating, which is how a guess
   // is told apart from something you typed — only guesses get replaced.
+  // A phone is where you are when you eat, so it guesses on its own; at a
+  // computer the location button asks. `dismissedRef` holds the ratings whose
+  // location you emptied — those stop being guessed at for the rest of the
+  // dialog.
   const [autoLocationPref] = useDevicePreference(AUTO_LOCATION_KEY, 'on', AUTO_LOCATION_VALUES);
+  const locationEnabled = autoLocationPref === 'on';
+  const onDevice = useMediaQuery('(pointer: coarse)');
   const autoLocation = useAutoLocation({
     open,
-    enabled: autoLocationPref === 'on',
+    enabled: locationEnabled,
+    auto: onDevice,
     knownLocations: locationSuggestions,
     restaurantLocations,
   });
   const lastGuessRef = useRef(new Map());
+  const dismissedRef = useRef(new Set());
+  const [locating, setLocating] = useState(false);
 
   function fillGuessedLocations(target) {
-    const result = applyAutoLocations(target, autoLocation.suggestFor, lastGuessRef.current, { isEdit });
+    const result = applyAutoLocations(target, autoLocation.suggestFor, lastGuessRef.current, {
+      isEdit,
+      dismissed: dismissedRef.current,
+    });
     lastGuessRef.current = result.lastAuto;
     return result.form;
+  }
+
+  /** The location field's own edits: emptying it also drops the coordinates. */
+  function changeLocation(ownerId, value) {
+    highlightedSuggestionsRef.current.location = '';
+    if (value === '') {
+      dismissedRef.current.add(ownerId);
+      setForm((f) => applyLinkedChange(f, ownerId, 'location', { location: '', coordinates: '' }));
+      return;
+    }
+    dismissedRef.current.delete(ownerId);
+    setForm((f) => applyLinkedChange(f, ownerId, 'location', { location: value }));
+  }
+
+  /** The location button: name where the device is, and record the point. */
+  async function useCurrentLocation(ownerId) {
+    setLocating(true);
+    try {
+      const guess = await autoLocation.locate();
+      if (!guess?.location) return;
+      // Asked for, so it counts as typed: a branch lookup landing later
+      // mustn't move a location you pressed the button for.
+      dismissedRef.current.delete(ownerId);
+      lastGuessRef.current.delete(ownerId);
+      setForm((f) => applyLinkedChange(f, ownerId, 'location', {
+        location: guess.location,
+        coordinates: guess.coordinates || '',
+      }));
+    } finally {
+      setLocating(false);
+    }
   }
   const categoriesMap = useMemo(() => new Map(categories.map((c) => [c.uuid, c])), [categories]);
 
@@ -742,6 +804,7 @@ export default function AddEditEntryModal({
       setTextWarnings([]);
       textDirtyRef.current = false;
       lastGuessRef.current = new Map();
+      dismissedRef.current = new Set();
       setFormKey((k) => k + 1);
       if (!entry && initialEntries && initialEntries.length > 0) {
         setForm(entriesToForm(initialEntries));
@@ -1084,9 +1147,11 @@ export default function AddEditEntryModal({
         {autoLocationPref === 'on' && (
           <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <PlaceIcon sx={{ fontSize: '0.9rem' }} />
-            {autoLocation.here
-              ? `A new restaurant with no location line gets the nearest branch, or where you are (${autoLocation.here}).`
-              : 'A new restaurant with no location line gets its nearest branch, or where you are, once your location is known.'}
+            {autoLocation.here?.location
+              ? `A new restaurant with no location line gets the nearest branch, or where you are (${autoLocation.here.location}).`
+              : onDevice
+                ? 'A new restaurant with no location line gets its nearest branch, or where you are, once your location is known.'
+                : 'A block with no location line is saved without one. The location button in the form fills in where you are.'}
           </Typography>
         )}
         {textErrors.length > 0 && (
@@ -1132,6 +1197,7 @@ export default function AddEditEntryModal({
         restaurantName: r.restaurantName,
         specifier: r.specifier,
         location: r.location,
+        coordinates: r.coordinates || '',
         dateRated: r.dateRatedMs ?? dateInputToMs(r.dateRated),
         additionalInfo: r.additionalInfo,
         picture: r.picture,
@@ -1205,6 +1271,7 @@ export default function AddEditEntryModal({
           restaurantName: r.restaurantName,
           specifier: r.specifier,
           location: r.location,
+          coordinates: r.coordinates || '',
           dateRated: r.dateRatedMs ?? dateInputToMs(r.dateRated),
           additionalInfo: r.additionalInfo,
           picture: r.picture,
@@ -1263,6 +1330,7 @@ export default function AddEditEntryModal({
           restaurantName: r.restaurantName,
           specifier: r.specifier,
           location: r.location,
+          coordinates: r.coordinates || '',
           dateRated: r.dateRatedMs ?? dateInputToMs(r.dateRated),
           additionalInfo: r.additionalInfo,
           picture: r.picture,
@@ -1309,12 +1377,6 @@ export default function AddEditEntryModal({
 
   // ── Field render helpers ──────────────────────────────────────────────────
 
-  /**
-   * Once a restaurant is named, an empty location takes the one from your most
-   * recent visit there. Only when the location field is on screen — a guess
-   * nobody can see shouldn't get saved.
-   */
-
   function renderSimpleSharedFields(values, onChange, autoFocusFirst = false, ownerId = 'primary') {
     return (
       <>
@@ -1360,21 +1422,45 @@ export default function AddEditEntryModal({
     return (
       <>
         <Grid item xs={12} sm={8}>
-          <Autocomplete
-            freeSolo
-            options={orderLocationSuggestions(locationSuggestions, restaurantLocations, values.restaurantName)}
-            inputValue={values.location}
-            onInputChange={(_, v) => {
-              highlightedSuggestionsRef.current.location = '';
-              onChange('location', v);
-            }}
-            {...suggestionCommitProps('location', onChange)}
-            renderInput={(params) => (
-              <TextField {...params}
-                InputProps={withLinkAdornment(params, ownerId, 'location')}
-                label={LABEL_LOCATION} placeholder="e.g. Denver" size="small" fullWidth />
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+            <Autocomplete
+              freeSolo
+              sx={{ flex: 1, minWidth: 0 }}
+              options={orderLocationSuggestions(locationSuggestions, restaurantLocations, values.restaurantName)}
+              inputValue={values.location}
+              onInputChange={(_, v) => changeLocation(ownerId, v)}
+              {...suggestionCommitProps('location', onChange)}
+              renderInput={(params) => (
+                <TextField {...params}
+                  InputProps={withLinkAdornment(params, ownerId, 'location')}
+                  label={LABEL_LOCATION} placeholder="e.g. Denver" size="small" fullWidth />
+              )}
+            />
+            {locationEnabled && (
+              <Tooltip title={onDevice ? 'Use where I am' : 'Use where this computer is'}>
+                <IconButton
+                  size="small"
+                  onClick={() => useCurrentLocation(ownerId)}
+                  disabled={locating}
+                  aria-label="Use my current location"
+                  sx={{ mt: 0.5 }}
+                >
+                  {locating ? <CircularProgress size={18} /> : <MyLocationIcon fontSize="small" />}
+                </IconButton>
+              </Tooltip>
             )}
-          />
+          </Box>
+          {values.coordinates && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.25, ml: 0.5 }}>
+              {values.coordinates}
+              <Tooltip title="Forget these coordinates">
+                <IconButton size="small" sx={{ p: 0.25 }} aria-label="Forget coordinates"
+                  onClick={() => onChange('coordinates', '')}>
+                  <CloseIcon sx={{ fontSize: 14 }} />
+                </IconButton>
+              </Tooltip>
+            </Typography>
+          )}
         </Grid>
         <Grid item xs={12} sm={4}>
           <TextField label={LABEL_DATE} type="date"
@@ -1622,6 +1708,7 @@ export default function AddEditEntryModal({
                   <Typography variant="caption" color="text.secondary" sx={{ ml: 1.5, display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
                     <PlaceIcon sx={{ fontSize: '0.9rem' }} />
                     {form.location}
+                    {form.coordinates ? ` (${form.coordinates})` : ''}
                   </Typography>
                 )}
               </Grid>

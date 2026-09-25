@@ -24,6 +24,7 @@ export function createAdditionChange(entry, changeMethod = DEFAULT_METHOD) {
     status: entry.status ?? '',
     tags: entry.tags ?? [],
     triedRatings: entry.triedRatings ?? [],
+    coordinates: entry.coordinates ?? '',
     changeMethod,
     dateOfChange: Date.now(),
   };

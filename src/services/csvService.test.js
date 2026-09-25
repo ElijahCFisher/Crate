@@ -33,6 +33,7 @@ const sampleEntry = {
   status: '',
   tags: [],
   triedRatings: [],
+  coordinates: '39.73921, -104.99025',
 };
 
 const sampleCategoryEntry = {
@@ -52,6 +53,7 @@ const sampleCategoryEntry = {
   status: '',
   tags: [],
   triedRatings: [],
+  coordinates: '',
 };
 
 const sampleChange = {
@@ -77,6 +79,7 @@ const sampleChange = {
   status: '',
   tags: [],
   triedRatings: [],
+  coordinates: '',
 };
 
 // ── parseCombined ─────────────────────────────────────────────────────────────
@@ -451,6 +454,19 @@ describe('parseLinkedFields / serializeLinkedFields', () => {
   });
 });
 
+describe('the coordinates column', () => {
+  it('keeps the point a rating was made at, alongside the name', () => {
+    const entry = { ...sampleEntry, location: 'Hampden, Denver', coordinates: '39.65432, -104.91234' };
+    const parsed = parseCombined(generateCombined({ combined: new Map([[entry.uuid, entry]]) })).get(entry.uuid);
+    expect(parsed).toMatchObject({ location: 'Hampden, Denver', coordinates: '39.65432, -104.91234' });
+  });
+
+  it('carries them through an addition change', () => {
+    const change = { ...sampleChange, coordinates: '39.65432, -104.91234' };
+    expect(parseChangelog(generateChangelog({ changelog: [change] }))[0].coordinates).toBe('39.65432, -104.91234');
+  });
+});
+
 describe('to-try columns', () => {
   it('round-trips status, tags and tried ratings on a to-try entry', () => {
     const entry = {
@@ -465,7 +481,7 @@ describe('to-try columns', () => {
 
   it('reads files written before the columns existed as blanks', () => {
     const old = 'UUID,Entry Type,Restaurant Name\nu1,food,Crema';
-    expect(parseCombined(old).get('u1')).toMatchObject({ status: '', tags: [], triedRatings: [] });
+    expect(parseCombined(old).get('u1')).toMatchObject({ status: '', tags: [], triedRatings: [], coordinates: '' });
   });
 
   it('carries the new fields through an addition change', () => {

@@ -65,6 +65,7 @@ function entryFromAdditionChange(change) {
     status: change.status ?? '',
     tags: change.tags ?? [],
     triedRatings: change.triedRatings ?? [],
+    coordinates: change.coordinates ?? '',
   };
 }
 
@@ -118,6 +119,7 @@ const ENTRY_DEFAULTS = {
   status: '',
   tags: [],
   triedRatings: [],
+  coordinates: '',
 };
 
 /**

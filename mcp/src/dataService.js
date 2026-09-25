@@ -82,6 +82,7 @@ const ENTRY_DEFAULTS = {
   additionalInfo: '',
   picture: '',
   linkedFields: {},
+  coordinates: '',
 };
 
 const CHANGE_METHOD = 'MCP tool';

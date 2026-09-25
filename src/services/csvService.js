@@ -4,13 +4,15 @@ const COMBINED_MARKER = 'SECTION,COMBINED';
 const CHANGELOG_MARKER = 'SECTION,CHANGELOG';
 
 // Status, Tags and Tried Ratings belong to to-try entries (Entry Type "totry")
-// and stay blank on ratings and categories. They're appended, so files written
-// before they existed parse the same, and a parse of those files gives blanks.
+// and stay blank on ratings and categories. Coordinates is where a rating was,
+// to the metre, while Location stays the name you'd write — the one that groups
+// and filters. All four are appended, so files written before they existed
+// parse the same, and a parse of those files gives blanks.
 const COMBINED_FIELDS = [
   'UUID', 'Entry Type', 'Identicals', 'Categories', 'Rating Category',
   'Restaurant Name', 'Specifier', 'Location', 'Score', 'Date Rated',
   'Additional Information', 'Picture', 'Linked Fields',
-  'Status', 'Tags', 'Tried Ratings',
+  'Status', 'Tags', 'Tried Ratings', 'Coordinates',
 ];
 
 const CHANGELOG_FIELDS = [
@@ -18,7 +20,7 @@ const CHANGELOG_FIELDS = [
   'Identicals', 'Categories', 'Rating Category', 'Restaurant Name',
   'Specifier', 'Location', 'Score', 'Date Rated', 'Additional Information',
   'Picture', 'Entry Type', 'Change Method', 'Date of Change', 'Linked Fields',
-  'Status', 'Tags', 'Tried Ratings',
+  'Status', 'Tags', 'Tried Ratings', 'Coordinates',
 ];
 
 // ── Split-file parse / generate (two separate Drive files) ───────────────────
@@ -175,6 +177,7 @@ function rowToEntry(row) {
     status: row['Status'] || '',
     tags: parseList(row['Tags']),
     triedRatings: parseList(row['Tried Ratings']),
+    coordinates: row['Coordinates'] || '',
   };
 }
 
@@ -196,6 +199,7 @@ function entryToRow(entry) {
     'Status': entry.status || '',
     'Tags': serializeList(entry.tags),
     'Tried Ratings': serializeList(entry.triedRatings),
+    'Coordinates': entry.coordinates || '',
   };
 }
 
@@ -223,6 +227,7 @@ function rowToChange(row) {
     status: row['Status'] || '',
     tags: parseList(row['Tags']),
     triedRatings: parseList(row['Tried Ratings']),
+    coordinates: row['Coordinates'] || '',
   };
 }
 
@@ -250,5 +255,6 @@ function changeToRow(change) {
     'Status': change.status || '',
     'Tags': serializeList(change.tags),
     'Tried Ratings': serializeList(change.triedRatings),
+    'Coordinates': change.coordinates || '',
   };
 }

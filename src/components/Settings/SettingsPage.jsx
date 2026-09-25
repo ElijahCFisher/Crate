@@ -84,8 +84,10 @@ export default function SettingsPage({
       />
       <Typography variant="caption" color="text.secondary" display="block" sx={{ maxWidth: 560 }}>
         New ratings with no location get the nearest branch of the restaurant you name, or where it was
-        last rated, or where you are. Your coordinates are sent to OpenStreetMap to name the place and
-        aren&apos;t stored. A location you type is never replaced. Saved per device.
+        last rated, or where you are. On a phone or tablet that happens as you open the form; on a
+        computer nothing is looked up until you press the location button in it. Your coordinates are
+        sent to OpenStreetMap to name the place, and are saved with the rating alongside the name. A
+        location you type is never replaced, and clearing one stops it coming back. Saved per device.
       </Typography>
 
       {onUpdateSearchVocabulary && (

@@ -48,6 +48,15 @@ export function nameLocation(address, knownLocations = []) {
   return [area, city].filter(Boolean).join(', ');
 }
 
+/**
+ * Coordinates as they're stored: "39.73921, -104.99025". Five decimals is
+ * about a metre, which is finer than any table you'd sit at.
+ */
+export function formatCoords(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return '';
+  return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+
 /** Great-circle distance in km. */
 export function distanceKm(lat1, lon1, lat2, lon2) {
   const rad = (d) => (d * Math.PI) / 180;
@@ -88,7 +97,14 @@ export function nearestPlace(results, lat, lon, maxKm = 25) {
  *   1. the nearest branch of the restaurant you named, found around you;
  *   2. where you last rated that restaurant, when no branch turned up nearby;
  *   3. where you are.
+ *
+ * Each is { location, coordinates } — the name to show and the point to
+ * record — or null. Where you last rated somewhere has no coordinates of its
+ * own, so it carries the name alone.
  */
-export function chooseAutoLocation({ branch = '', history = '', here = '' } = {}) {
-  return branch || history || here || '';
+export function chooseAutoLocation({ branch = null, history = null, here = null } = {}) {
+  for (const guess of [branch, history, here]) {
+    if (guess?.location) return { location: guess.location, coordinates: guess.coordinates || '' };
+  }
+  return null;
 }

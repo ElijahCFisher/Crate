@@ -108,6 +108,7 @@ function summarizeEntry(entry, combined) {
     dateRated: entry.dateRated ? new Date(entry.dateRated).toISOString().slice(0, 10) : undefined,
     ratedAt: entry.dateRated ? new Date(entry.dateRated).toISOString() : undefined,
     notes: entry.additionalInfo || undefined,
+    coordinates: entry.coordinates || undefined,
     identicals: entry.identicals?.length ? entry.identicals : undefined,
   };
 }
@@ -132,7 +133,7 @@ function resolveCategory(categoryName, combined) {
 }
 
 /** Shared add-rating field resolution (category name/uuid, score snap, date). Returns {entryData} or {error}. */
-function buildEntryData({ restaurantName, specifier, location, score, category, categoryUuid, notes, dateRated }, combined) {
+function buildEntryData({ restaurantName, specifier, location, coordinates, score, category, categoryUuid, notes, dateRated }, combined) {
   let ratingCategory = categoryUuid || '';
   if (!ratingCategory && category) {
     const resolved = resolveCategory(category, combined);
@@ -148,6 +149,7 @@ function buildEntryData({ restaurantName, specifier, location, score, category, 
       restaurantName,
       specifier: specifier || '',
       location: location || '',
+      coordinates: coordinates || '',
       score: String(roundToValidScore(score)),
       additionalInfo: notes || '',
       ratingCategory,
@@ -229,6 +231,7 @@ const ratingInput = {
   restaurantName: z.string().min(1),
   specifier: z.string().optional().describe('The specific food/dish name.'),
   location: z.string().optional(),
+  coordinates: z.string().optional().describe('Where it was, as "lat, lon" (e.g. "39.73921, -104.99025"). The app records this from the device; location stays the name you would write.'),
   score: z.number().min(0).max(10),
   category: z.string().optional(),
   categoryUuid: z.string().optional(),
@@ -280,6 +283,7 @@ server.registerTool(
       restaurantName: z.string().optional(),
       specifier: z.string().optional(),
       location: z.string().optional(),
+      coordinates: z.string().optional().describe('Where it was, as "lat, lon". Pass "" to forget it.'),
       score: z.number().min(0).max(10).optional(),
       notes: z.string().optional(),
       category: z.string().optional(),
@@ -289,7 +293,7 @@ server.registerTool(
       fields: z.record(z.string(), z.any()).optional().describe('Raw field/value pairs passed straight to dataService.modifyEntry, for anything the named parameters above don\'t cover.'),
     },
   },
-  async ({ uuid, restaurantName, specifier, location, score, notes, category, categoryUuid, identicals, dateRated, fields }) => {
+  async ({ uuid, restaurantName, specifier, location, coordinates, score, notes, category, categoryUuid, identicals, dateRated, fields }) => {
     try {
       const fileIds = await getFileIds();
       const combined = await dataService.readCombined(fileIds);
@@ -299,6 +303,7 @@ server.registerTool(
       if (restaurantName !== undefined) updates.restaurantName = restaurantName;
       if (specifier !== undefined) updates.specifier = specifier;
       if (location !== undefined) updates.location = location;
+      if (coordinates !== undefined) updates.coordinates = coordinates;
       if (score !== undefined) updates.score = String(roundToValidScore(score));
       if (notes !== undefined) updates.additionalInfo = notes;
       if (identicals !== undefined) updates.identicals = identicals;
