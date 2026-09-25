@@ -169,7 +169,7 @@ export default function ToTryItemDialog({
               <CategorySelect
                 categories={categories}
                 value={form.ratingCategory}
-                label="Genre"
+                label="Category"
                 onChange={(uuid, newName) => {
                   // To-try items don't create categories; a new name is kept as a tag.
                   if (newName) setForm((f) => ({ ...f, tags: [...new Set([...f.tags, newName])] }));

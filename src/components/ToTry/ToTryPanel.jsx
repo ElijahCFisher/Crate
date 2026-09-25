@@ -24,7 +24,6 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import AddIcon from '@mui/icons-material/Add';
-import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd';
 import RateReviewIcon from '@mui/icons-material/RateReview';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
@@ -35,7 +34,6 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import FilterBar from '../Filters/FilterBar';
 import ToTryItemDialog from './ToTryItemDialog';
-import ToTryImportDialog from './ToTryImportDialog';
 import {
   applyFilters, getActiveFilters, getFilterLogicState, makeDefaultFilter,
   parseSearchVocabulary, remapFilterLogic,
@@ -71,7 +69,6 @@ export default function ToTryPanel({
   }, [statusFilter, filters, filterLogic]);
 
   const [editing, setEditing] = useState(null); // item, or 'new'
-  const [importOpen, setImportOpen] = useState(false);
   const [menu, setMenu] = useState(null);       // { anchor, item }
   const [confirmDelete, setConfirmDelete] = useState(null);
 
@@ -109,7 +106,7 @@ export default function ToTryPanel({
 
   // Grouped by where, like the list it came from: places A–Z, then everything
   // with no place (chains, groceries, foods to find anywhere) last. Within a
-  // place, by genre, then name.
+  // place, by category, then name.
   const groups = useMemo(() => {
     const byPlace = new Map();
     for (const item of filtered) {
@@ -218,9 +215,6 @@ export default function ToTryPanel({
           </Typography>
         </Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button variant="outlined" size="small" startIcon={<PlaylistAddIcon />} onClick={() => setImportOpen(true)}>
-            Import list
-          </Button>
           <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={() => setEditing('new')}>
             Add
           </Button>
@@ -258,7 +252,7 @@ export default function ToTryPanel({
           <TableHead>
             <TableRow>
               <TableCell>Place / brand</TableCell>
-              <TableCell>Genre</TableCell>
+              <TableCell>Category</TableCell>
               <TableCell>Tags</TableCell>
               <TableCell>Notes</TableCell>
               <TableCell align="right" />
@@ -270,14 +264,14 @@ export default function ToTryPanel({
                 <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
                   <Typography variant="body2" color="text.secondary">
                     {items.length === 0
-                      ? 'Nothing to try yet. Add places and foods one at a time, or import a list you already keep.'
+                      ? 'Nothing to try yet. Add places and foods you want to get to.'
                       : 'Nothing here matches.'}
                   </Typography>
                 </TableCell>
               </TableRow>
             )}
             {groups.map((group) => (
-              <React.Fragment key={group.place || ' '}>
+              <React.Fragment key={group.place || '\u0000'}>
                 <TableRow>
                   <TableCell colSpan={5} sx={{ bgcolor: 'action.hover', py: 0.75 }}>
                     <Typography variant="subtitle2">
@@ -335,15 +329,6 @@ export default function ToTryPanel({
         }}
         onOpenRating={(rating) => { setEditing(null); onOpenRating(rating); }}
         onClose={() => setEditing(null)}
-      />
-
-      <ToTryImportDialog
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
-        categories={categories}
-        foodEntries={foodEntries}
-        toTryItems={items}
-        onImport={(list) => onAdd(list)}
       />
 
       <Dialog open={!!confirmDelete} onClose={() => setConfirmDelete(null)}>
