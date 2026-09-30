@@ -37,7 +37,16 @@
  * anything that doesn't match is just notes. Two categories can share a name
  * ("breakfast > egg" and "side > egg"), so a category can also be written as a
  * path, outermost first: `breakfast > egg`, `breakfast -> egg` or
- * `breakfast/egg`.
+ * `breakfast/egg`. A name that shares its wording with a name further in wins
+ * by being further out — plain `chicken` is `main > chicken`, not
+ * `main > sandwich > chicken`.
+ *
+ * Square brackets say where the category ends, for when guessing that from the
+ * notes isn't good enough: `Gyro 8 [french toast] really tender` is the French
+ * toast category and "really tender". Anything can go in them, a path
+ * included — `[breakfast > french toast]` — and empty brackets mean no
+ * category at all, so `Fries 7 [] chicken was dry` keeps "chicken was dry" as
+ * notes rather than reading a category out of it.
  */
 
 const SCORE_PATTERN = /^\d{1,2}(?:\.\d+)?$/;
@@ -53,6 +62,8 @@ const NO_SCORE = '?';
 const PATH_SEPARATOR = /\s*(?:->|>|\/)\s*/;
 /** A leading `a > b` phrase, used to explain a path that matched nothing. */
 const EXPLICIT_PATH = /^(\S+(?:\s*(?:->|>)\s*\S+)+)/;
+/** A category in square brackets, which says where it ends. */
+const BRACKETED_CATEGORY = /^\[([^\]]*)\]\s*/;
 
 function normalize(value) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -118,19 +129,32 @@ function isParentChain(category, names, byUuid) {
 }
 
 /**
+ * Categories with the fewest above them first, ties keeping the order they
+ * came in. Where a name repeats down one branch — `main > chicken` and
+ * `main > sandwich > chicken` — the outer one is the broader thing, and the
+ * broader thing is what a bare word means.
+ */
+function shallowestFirst(categories, byUuid) {
+  return categories
+    .map((category, order) => ({ category, order, depth: ancestorChain(category, byUuid).length }))
+    .sort((a, b) => a.depth - b.depth || a.order - b.order)
+    .map(({ category }) => category);
+}
+
+/**
  * Every existing category a phrase could mean, best first. Never invents one.
  * An exact name wins; failing that the phrase is read as a path from the
  * outside in ("breakfast > egg", "breakfast/egg"), preferring a path that names
  * the real parent chain over one that merely has those names somewhere above;
  * failing that "chicken sandwich" looks for a "chicken" category somewhere
- * under a "sandwich" one.
+ * under a "sandwich" one. Within each of those, shallowest first.
  */
 export function resolveCategoryMatches(phrase, index) {
   const key = normalize(phrase);
   if (!key) return [];
 
   const exact = index.byName.get(key);
-  if (exact && exact.length > 0) return exact.map((c) => c.uuid);
+  if (exact && exact.length > 0) return shallowestFirst(exact, index.byUuid).map((c) => c.uuid);
 
   const segments = key.split(PATH_SEPARATOR).map(normalize);
   if (segments.length > 1 && segments.every(Boolean)) {
@@ -144,7 +168,7 @@ export function resolveCategoryMatches(phrase, index) {
     // that tightly does a gappy path ("main/chicken" for something nested
     // deeper) still resolve, which is the convenience worth keeping.
     const exactChain = loose.filter((c) => isParentChain(c, wanted, index.byUuid));
-    return (exactChain.length > 0 ? exactChain : loose).map((c) => c.uuid);
+    return shallowestFirst(exactChain.length > 0 ? exactChain : loose, index.byUuid).map((c) => c.uuid);
   }
 
   const words = key.split(' ');
@@ -153,7 +177,7 @@ export function resolveCategoryMatches(phrase, index) {
     const ancestorName = words.slice(split).join(' ');
     const matches = (index.byName.get(childName) || [])
       .filter((c) => ancestorNames(c, index.byUuid).includes(ancestorName));
-    if (matches.length > 0) return matches.map((c) => c.uuid);
+    if (matches.length > 0) return shallowestFirst(matches, index.byUuid).map((c) => c.uuid);
   }
   return [];
 }
@@ -238,28 +262,54 @@ function findScoreIndex(tokens) {
   return -1;
 }
 
+/** One phrase, several categories: take the outermost and say so. */
+function ambiguous(matches, phrase, notes, index) {
+  const options = matches.map((uuid) => categoryPath(uuid, index)).join(', ');
+  return {
+    ratingCategory: matches[0],
+    notes,
+    warning: `"${phrase}" matches ${matches.length} categories (${options}) —`
+      + ` used ${categoryPath(matches[0], index)}, the one with fewest above it.`
+      + ` Write a path, like "${categoryPath(matches[1], index)}", to pick another.`,
+  };
+}
+
 /**
- * Longest leading phrase that names a real category; the rest is notes. A
- * phrase that names several categories, or a path written on purpose that
- * names none, comes back with a warning rather than silently doing something.
+ * The category after the score, and the notes after that.
+ *
+ * Square brackets say outright where the category ends; empty ones say there
+ * isn't one. Otherwise it's the longest leading phrase that names a real
+ * category, the rest being notes. A phrase that names several categories, or
+ * one written on purpose — in brackets or as a path — that names none, comes
+ * back with a warning rather than silently doing something.
  */
 function splitCategoryAndNotes(tokens, index) {
+  const rest = tokens.join(' ');
+
+  const bracketed = BRACKETED_CATEGORY.exec(rest);
+  if (bracketed) {
+    const phrase = bracketed[1].trim();
+    const notes = rest.slice(bracketed[0].length).trim();
+    if (!phrase) return { ratingCategory: '', notes, warning: null };
+    const matches = resolveCategoryMatches(phrase, index);
+    if (matches.length === 1) return { ratingCategory: matches[0], notes, warning: null };
+    if (matches.length > 1) return ambiguous(matches, phrase, notes, index);
+    return {
+      ratingCategory: '',
+      notes: [phrase, notes].filter(Boolean).join(' '),
+      warning: `No category matches "${phrase}" — kept it as notes.`,
+    };
+  }
+
   for (let count = tokens.length; count >= 1; count--) {
     const phrase = tokens.slice(0, count).join(' ');
     const matches = resolveCategoryMatches(phrase, index);
     if (matches.length === 0) continue;
     const notes = tokens.slice(count).join(' ');
     if (matches.length === 1) return { ratingCategory: matches[0], notes, warning: null };
-    const options = matches.map((uuid) => categoryPath(uuid, index)).join(', ');
-    return {
-      ratingCategory: matches[0],
-      notes,
-      warning: `"${phrase}" matches ${matches.length} categories (${options}) — used the first.`
-        + ` Write the path, like "${categoryPath(matches[0], index)}", to pick one.`,
-    };
+    return ambiguous(matches, phrase, notes, index);
   }
 
-  const rest = tokens.join(' ');
   const written = EXPLICIT_PATH.exec(rest);
   return {
     ratingCategory: '',

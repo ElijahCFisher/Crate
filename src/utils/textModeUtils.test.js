@@ -299,6 +299,16 @@ describe('category paths', () => {
     expect(generateText(ratings, shared)).toBe('Diner\nOmelet 8 side > egg\nGyro 7 greek');
   });
 
+  it('reads a bare name as the category fewest steps in', () => {
+    // "main > chicken" and "main > sandwich > chicken" both exist; plain
+    // "chicken" is the broader one.
+    expect(resolveCategoryMatches('chicken', nestedIndex)).toEqual(['c-main-chicken', 'c-sandwich-chicken']);
+    const { ratings, warnings } = parseText('Diner\nDenver\nWings 6 chicken', nested);
+    expect(ratings[0].ratingCategory).toBe('c-main-chicken');
+    expect(warnings[0].message).toContain('used main > chicken');
+    expect(warnings[0].message).toContain('to pick another');
+  });
+
   it('round-trips the path it wrote', () => {
     const ratings = [
       { id: 'a', restaurantName: 'Diner', specifier: 'Omelet', score: '8', ratingCategory: 'c-side-egg', additionalInfo: 'runny' },
@@ -306,6 +316,49 @@ describe('category paths', () => {
     const { ratings: reparsed, warnings } = parseText(generateText(ratings, shared), shared);
     expect(warnings).toEqual([]);
     expect(reparsed[0]).toMatchObject({ ratingCategory: 'c-side-egg', additionalInfo: 'runny' });
+  });
+});
+
+describe('a category in square brackets', () => {
+  const spaced = [
+    { uuid: 'c-breakfast', restaurantName: 'breakfast', ratingCategory: '' },
+    { uuid: 'c-french-toast', restaurantName: 'french toast', ratingCategory: 'c-breakfast' },
+    { uuid: 'c-chicken', restaurantName: 'chicken', ratingCategory: '' },
+  ];
+
+  function rating(line) {
+    const { ratings, warnings } = parseText(`Diner\nDenver\n${line}`, spaced);
+    return { ...ratings[0], warning: warnings[0]?.message || null };
+  }
+
+  it('takes everything in the brackets as the category, spaces and all', () => {
+    expect(rating('Gyro 8 [french toast] really tender')).toMatchObject({
+      ratingCategory: 'c-french-toast', additionalInfo: 'really tender', warning: null,
+    });
+  });
+
+  it('takes a path in brackets too', () => {
+    expect(rating('Gyro 8 [breakfast > french toast]')).toMatchObject({
+      ratingCategory: 'c-french-toast', additionalInfo: '', warning: null,
+    });
+  });
+
+  it('reads empty brackets as no category, whatever the notes say', () => {
+    expect(rating('Fries 7 [] chicken was dry')).toMatchObject({
+      ratingCategory: '', additionalInfo: 'chicken was dry', warning: null,
+    });
+  });
+
+  it('keeps brackets that name nothing as notes, and says so', () => {
+    const parsed = rating('Toast 5 [not a category] with jam');
+    expect(parsed).toMatchObject({ ratingCategory: '', additionalInfo: 'not a category with jam' });
+    expect(parsed.warning).toContain('No category matches "not a category"');
+  });
+
+  it('still guesses when there are no brackets', () => {
+    expect(rating('Gyro 8 french toast really tender')).toMatchObject({
+      ratingCategory: 'c-french-toast', additionalInfo: 'really tender',
+    });
   });
 });
 

@@ -1135,10 +1135,13 @@ export default function AddEditEntryModal({
           Indent a line to log it as part of the rating above it. A blank line starts a new restaurant.
           {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>?</Box>
           {' '}stands in for a score you haven't decided on yet.
-          Categories are only matched to ones you already have — never created; when a name is
-          used in more than one place, write
+          Categories are only matched to ones you already have — never created; a name used in
+          more than one place means the one fewest steps in, so write
           {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>breakfast &gt; egg</Box>
-          {' '}to say which. A line of its own holding nothing but a date —
+          {' '}for another. Square brackets say where the category ends —
+          {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>[french toast]</Box>{' '}— and
+          {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>[]</Box>{' '}means none, leaving
+          the rest as notes. A line of its own holding nothing but a date —
           {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>9/1</Box>{' '}(this year) or
           {' '}<Box component="span" sx={{ fontFamily: 'monospace' }}>9/1/25</Box>{' '}— dates what is
           above it: the one rating it sits under, the whole restaurant when it closes one, or every
