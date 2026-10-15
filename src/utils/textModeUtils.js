@@ -535,9 +535,12 @@ export function generateTextLines(ratings, categories = [], { now = new Date() }
   });
 
   for (const { restaurantName, location, lines } of blocks) {
-    // A block with nothing in it writes nothing — that's the blank rating a new
-    // entry starts with, which shouldn't put a line in the box.
-    if (lines.length === 0 && !restaurantName && !location) continue;
+    // A block with no ratings and no restaurant writes nothing — that's the
+    // blank rating a new entry starts with, which shouldn't put a line in the
+    // box. Not even when it has a location: a guessed location on its own would
+    // open the box with a placeholder restaurant and a location under it,
+    // neither of which was typed. The form keeps the location either way.
+    if (lines.length === 0 && !restaurantName) continue;
     if (out.length > 0) out.push({ text: '', id: null });
     // A block with no restaurant still needs a header line to stand on: an
     // empty one would read as the blank line that ends a block.

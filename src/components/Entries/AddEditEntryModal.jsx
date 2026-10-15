@@ -589,6 +589,14 @@ export function applyTextToForm(form, text, categories, baselineLines) {
   const idByLine = new Map();
   const pending = [];
 
+  /**
+   * Coordinates are where one location is, so a location rewritten in the box
+   * leaves them behind — the same as writing in the field.
+   */
+  function patchFor(field, value) {
+    return field === 'location' ? { location: value, coordinates: '' } : { [field]: value };
+  }
+
   /** A block with no date line leaves whatever date the rating already had. */
   function applyDate(current, id, dateRated) {
     if (!dateRated || readRatingField(current, id, 'dateRated') === dateRated) return current;
@@ -614,7 +622,7 @@ export function applyTextToForm(form, text, categories, baselineLines) {
     if (exists) {
       for (const field of TEXT_FIELDS) {
         if (readRatingField(next, id, field) === values[field]) continue;
-        next = applyLinkedChange(next, id, field, { [field]: values[field] });
+        next = applyLinkedChange(next, id, field, patchFor(field, values[field]));
       }
       next = applyDate(next, id, parsed.dateRated);
       idByLine.set(parsed.lineNumber, id);
@@ -635,7 +643,7 @@ export function applyTextToForm(form, text, categories, baselineLines) {
     const first = pending.shift();
     for (const field of TEXT_FIELDS) {
       if (readRatingField(next, 'primary', field) === first.values[field]) continue;
-      next = applyLinkedChange(next, 'primary', field, { [field]: first.values[field] });
+      next = applyLinkedChange(next, 'primary', field, patchFor(field, first.values[field]));
     }
     next = applyDate(next, 'primary', first.dateRated);
     idByLine.set(first.lineNumber, 'primary');
@@ -645,7 +653,7 @@ export function applyTextToForm(form, text, categories, baselineLines) {
     if (header) {
       for (const field of ['restaurantName', 'location']) {
         if (readRatingField(next, 'primary', field) === header[field]) continue;
-        next = applyLinkedChange(next, 'primary', field, { [field]: header[field] });
+        next = applyLinkedChange(next, 'primary', field, patchFor(field, header[field]));
       }
       next = applyDate(next, 'primary', header.dateRated);
     }
@@ -729,6 +737,9 @@ export default function AddEditEntryModal({
   });
   const lastGuessRef = useRef(new Map());
   const dismissedRef = useRef(new Set());
+  // Which location each rating's coordinates describe: write somewhere else in
+  // the field and they're no longer where that is.
+  const coordsForRef = useRef(new Map());
   const [locating, setLocating] = useState(false);
 
   function fillGuessedLocations(target) {
@@ -737,19 +748,28 @@ export default function AddEditEntryModal({
       dismissed: dismissedRef.current,
     });
     lastGuessRef.current = result.lastAuto;
+    for (const [id, location] of result.lastAuto) coordsForRef.current.set(id, location);
     return result.form;
   }
 
-  /** The location field's own edits: emptying it also drops the coordinates. */
+  /**
+   * The location field's own edits. Coordinates are where one particular place
+   * is, so writing a different place drops them, and emptying the field drops
+   * them too.
+   */
   function changeLocation(ownerId, value) {
     highlightedSuggestionsRef.current.location = '';
     if (value === '') {
       dismissedRef.current.add(ownerId);
+      coordsForRef.current.delete(ownerId);
       setForm((f) => applyLinkedChange(f, ownerId, 'location', { location: '', coordinates: '' }));
       return;
     }
     dismissedRef.current.delete(ownerId);
-    setForm((f) => applyLinkedChange(f, ownerId, 'location', { location: value }));
+    const keepCoordinates = value === coordsForRef.current.get(ownerId);
+    setForm((f) => applyLinkedChange(f, ownerId, 'location', keepCoordinates
+      ? { location: value }
+      : { location: value, coordinates: '' }));
   }
 
   /** The location button: name where the device is, and record the point. */
@@ -762,6 +782,7 @@ export default function AddEditEntryModal({
       // mustn't move a location you pressed the button for.
       dismissedRef.current.delete(ownerId);
       lastGuessRef.current.delete(ownerId);
+      coordsForRef.current.set(ownerId, guess.location);
       setForm((f) => applyLinkedChange(f, ownerId, 'location', {
         location: guess.location,
         coordinates: guess.coordinates || '',
@@ -805,6 +826,7 @@ export default function AddEditEntryModal({
       textDirtyRef.current = false;
       lastGuessRef.current = new Map();
       dismissedRef.current = new Set();
+      coordsForRef.current = new Map();
       setFormKey((k) => k + 1);
       if (!entry && initialEntries && initialEntries.length > 0) {
         setForm(entriesToForm(initialEntries));
@@ -1432,7 +1454,7 @@ export default function AddEditEntryModal({
               options={orderLocationSuggestions(locationSuggestions, restaurantLocations, values.restaurantName)}
               inputValue={values.location}
               onInputChange={(_, v) => changeLocation(ownerId, v)}
-              {...suggestionCommitProps('location', onChange)}
+              {...suggestionCommitProps('location', (_field, v) => changeLocation(ownerId, v))}
               renderInput={(params) => (
                 <TextField {...params}
                   InputProps={withLinkAdornment(params, ownerId, 'location')}

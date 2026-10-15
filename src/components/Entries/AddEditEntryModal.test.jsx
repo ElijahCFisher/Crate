@@ -198,6 +198,25 @@ describe('applyTextToForm', () => {
     expect(next.additionalRatings).toHaveLength(0);
   });
 
+  it('drops the coordinates when the box names another location', () => {
+    const form = { ...filledForm(), coordinates: '39.76000, -104.98000' };
+    const lines = baselineFor(form);
+    const edited = lines.map((l) => l.text).join(String.fromCharCode(10)).replace('Denver', 'Centennial');
+
+    const { form: next } = applyTextToForm(form, edited, categories, lines);
+    expect(next.location).toBe('Centennial');
+    expect(next.coordinates).toBe('');
+  });
+
+  it('keeps the coordinates when the box leaves the location alone', () => {
+    const form = { ...filledForm(), coordinates: '39.76000, -104.98000' };
+    const lines = baselineFor(form);
+    const edited = lines.map((l) => l.text).join(String.fromCharCode(10)).replace('Gyro', 'Souvlaki');
+
+    const { form: next } = applyTextToForm(form, edited, categories, lines);
+    expect(next).toMatchObject({ specifier: 'Souvlaki', location: 'Denver', coordinates: '39.76000, -104.98000' });
+  });
+
   it('turns an added line into a new rating', () => {
     const form = filledForm();
     const lines = baselineFor(form);

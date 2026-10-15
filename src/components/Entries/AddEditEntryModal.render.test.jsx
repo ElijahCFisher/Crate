@@ -39,6 +39,15 @@ const savedEntry = {
   linkedFields: {},
 };
 
+/** Type into an input the way a person does, so React sees the change. */
+async function type(input, value) {
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  await act(async () => {
+    setValue.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 async function render(props) {
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -79,6 +88,15 @@ describe('the entry dialog on screen', () => {
     cleanup = view.cleanup;
     expect(view.text()).toContain('39.76000, -104.98000');
     expect(view.find('[aria-label="Forget coordinates"]')).toBeTruthy();
+  });
+
+  it('drops the coordinates once another location is written', async () => {
+    const view = await render({ entry: savedEntry });
+    cleanup = view.cleanup;
+    expect(view.text()).toContain('39.76000, -104.98000');
+    await type(view.find('input[value="Larimer, Denver"]'), 'Union, Centennial');
+    expect(view.text()).not.toContain('39.76000, -104.98000');
+    expect(view.find('input[value="Union, Centennial"]')).toBeTruthy();
   });
 
   it('forgets the coordinates when asked, leaving the location', async () => {

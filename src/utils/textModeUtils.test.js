@@ -362,6 +362,25 @@ describe('a category in square brackets', () => {
   });
 });
 
+describe('what the box opens with', () => {
+  it('writes nothing for the blank rating a new entry starts with', () => {
+    const blank = [{ id: 'primary', restaurantName: '', location: '', specifier: '', score: '', ratingCategory: '', additionalInfo: '' }];
+    expect(generateText(blank, shared)).toBe('');
+  });
+
+  it('writes nothing for a guessed location with nothing else', () => {
+    // The location is filled in for you; on its own it isn't something you
+    // typed, and writing it would open the box with a placeholder restaurant.
+    const guessed = [{ id: 'primary', restaurantName: '', location: 'Hampden, Denver', specifier: '', score: '', ratingCategory: '', additionalInfo: '' }];
+    expect(generateText(guessed, shared)).toBe('');
+  });
+
+  it('still writes a restaurant typed ahead of what you ate there', () => {
+    const header = [{ id: 'primary', restaurantName: "Zorba's", location: 'Denver', specifier: '', score: '', ratingCategory: '', additionalInfo: '' }];
+    expect(generateText(header, shared)).toBe("Zorba's" + String.fromCharCode(10) + 'Denver');
+  });
+});
+
 describe('ratings that are missing a piece', () => {
   it('marks a rating with no score so it cannot be read as the location', () => {
     const ratings = [
