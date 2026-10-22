@@ -31,8 +31,8 @@ export function useAutoLocation({ open, enabled, auto = true, knownLocations, re
 
   /**
    * Where the device is: its coordinates, named through OpenStreetMap. The
-   * name is what you'd write, and the coordinates are recorded as well, so a
-   * failed or nameless lookup still leaves the point itself.
+   * name is what you'd write; the coordinates are recorded alongside it, and
+   * stand in as the name when the lookup fails.
    */
   const locate = useCallback(async () => {
     if (!enabled) return null;
@@ -47,6 +47,8 @@ export function useAutoLocation({ open, enabled, auto = true, knownLocations, re
       } catch (err) {
         console.info('[location] could not name where you are:', err?.message || err);
       }
+      // With no name to be had, the coordinates stand in as one: better a
+      // location you can read off a map than an empty field.
       const guess = { location: name || coordinates, coordinates };
       setHere(guess);
       return guess;

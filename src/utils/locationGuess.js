@@ -92,19 +92,45 @@ export function nearestPlace(results, lat, lon, maxKm = 25) {
   return best;
 }
 
+function locationParts(text) {
+  return String(text ?? '').split(',').map((part) => norm(part)).filter(Boolean);
+}
+
+/**
+ * Two of your location names for the same place — "Denver" and
+ * "Hampden, Denver", or "Speedway" and "Speedway, Tucson". Any part in common
+ * counts, since your names are "area, city" and either half may be left off.
+ */
+export function locationsAgree(a, b) {
+  const parts = locationParts(b);
+  return locationParts(a).some((part) => parts.includes(part));
+}
+
 /**
  * Which guess wins for a rating with no location of its own:
  *   1. the nearest branch of the restaurant you named, found around you;
- *   2. where you last rated that restaurant, when no branch turned up nearby;
- *   3. where you are.
+ *   2. where you are;
+ *   3. where you last rated that restaurant — but only when it's the same
+ *      place you're in and says it more precisely ("Hampden, Denver" while
+ *      OpenStreetMap only knew "Denver").
+ *
+ * Where you last had a brand is no evidence of where you are now: the last
+ * Lay's was in Spain, and most brands' newest location is nowhere near home.
+ * So it never stands in for not knowing where you are — with no position
+ * there's no guess at all.
  *
  * Each is { location, coordinates } — the name to show and the point to
- * record — or null. Where you last rated somewhere has no coordinates of its
- * own, so it carries the name alone.
+ * record — or null. A guess may carry coordinates and no name, which records
+ * where you were and leaves the field alone; `here` doesn't, since coordinates
+ * stand in as its name when OpenStreetMap can't supply one.
  */
 export function chooseAutoLocation({ branch = null, history = null, here = null } = {}) {
-  for (const guess of [branch, history, here]) {
-    if (guess?.location) return { location: guess.location, coordinates: guess.coordinates || '' };
+  if (branch?.location) return { location: branch.location, coordinates: branch.coordinates || '' };
+  if (!here?.location && !here?.coordinates) return null;
+  if (here.location && history?.location
+    && locationsAgree(history.location, here.location)
+    && locationParts(history.location).length > locationParts(here.location).length) {
+    return { location: history.location, coordinates: here.coordinates || '' };
   }
-  return null;
+  return { location: here.location || '', coordinates: here.coordinates || '' };
 }

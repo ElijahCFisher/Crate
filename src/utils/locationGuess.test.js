@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { areaAndCity, chooseAutoLocation, distanceKm, formatCoords, nameLocation, nearestPlace } from './locationGuess';
+import { areaAndCity, chooseAutoLocation, distanceKm, formatCoords, locationsAgree, nameLocation, nearestPlace } from './locationGuess';
 import { applyAutoLocations } from '../components/Entries/AddEditEntryModal';
 
 const known = ['Hampden, Denver', 'Central Market, Denver', '16th, Denver', 'Brighton', 'Aurora'];
@@ -58,14 +58,57 @@ describe('the nearest branch', () => {
     expect(nearestPlace([], here.lat, here.lon)).toBeNull();
   });
 
-  it('prefers a nearby branch, then where you last rated it, then where you are', () => {
+  it('prefers a nearby branch, then where you are', () => {
     const branch = { location: 'Aurora', coordinates: '39.70000, -104.80000' };
-    const history = { location: 'Brighton', coordinates: '' };
     const here = { location: 'Hampden, Denver', coordinates: '39.65432, -104.91234' };
-    expect(chooseAutoLocation({ branch, history, here })).toEqual(branch);
-    expect(chooseAutoLocation({ branch: null, history, here })).toEqual(history);
+    expect(chooseAutoLocation({ branch, here })).toEqual(branch);
     expect(chooseAutoLocation({ here })).toEqual(here);
     expect(chooseAutoLocation({})).toBeNull();
+  });
+
+  it('ignores where you last had the brand when that is somewhere else', () => {
+    // The last Lay's was in Spain; that says nothing about where you are.
+    const here = { location: 'Hampden, Denver', coordinates: '39.65432, -104.91234' };
+    const history = { location: 'Spain', coordinates: '' };
+    expect(chooseAutoLocation({ history, here })).toEqual(here);
+  });
+
+  it('makes no guess at all when there is no position', () => {
+    expect(chooseAutoLocation({ history: { location: 'Spain', coordinates: '' } })).toBeNull();
+    expect(chooseAutoLocation({ here: { location: '', coordinates: '' } })).toBeNull();
+  });
+
+  it('uses where you last rated it when that is the same place, said better', () => {
+    const here = { location: 'Denver', coordinates: '39.65432, -104.91234' };
+    const history = { location: 'Hampden, Denver', coordinates: '' };
+    expect(chooseAutoLocation({ history, here }))
+      .toEqual({ location: 'Hampden, Denver', coordinates: '39.65432, -104.91234' });
+  });
+
+  it('keeps where you are when it is already the more precise of the two', () => {
+    const here = { location: 'Hampden, Denver', coordinates: '39.65432, -104.91234' };
+    expect(chooseAutoLocation({ history: { location: 'Denver', coordinates: '' }, here })).toEqual(here);
+  });
+
+  it('passes along a guess that is coordinates and nothing else', () => {
+    // What a position with no name to be had looks like by the time it gets
+    // here: coordinates stand in as the name, so the field reads as a place
+    // you can find on a map.
+    const unnamed = { location: '39.65432, -104.91234', coordinates: '39.65432, -104.91234' };
+    expect(chooseAutoLocation({ here: unnamed })).toEqual(unnamed);
+  });
+});
+
+describe('two names for the same place', () => {
+  it('agree when they share a part', () => {
+    expect(locationsAgree('Denver', 'Hampden, Denver')).toBe(true);
+    expect(locationsAgree('speedway, tucson', 'Speedway')).toBe(true);
+    expect(locationsAgree('Denver', 'denver')).toBe(true);
+  });
+
+  it('do not agree when they share nothing', () => {
+    expect(locationsAgree('Spain', 'Hampden, Denver')).toBe(false);
+    expect(locationsAgree('', 'Denver')).toBe(false);
   });
 });
 
@@ -154,8 +197,27 @@ describe('filling guessed locations into a form', () => {
     expect(form.additionalRatings[0].location).toBe('');
   });
 
+  it('fills in the point for a location already naming where you are', () => {
+    const named = makeForm({ location: 'Aurora' });
+    const { form } = applyAutoLocations(named, suggestFor, new Map([['primary', 'Aurora']]));
+    expect(form.coordinates).toBe('39.70000, -104.80000');
+  });
+
+  it('records a point with no name without touching the location', () => {
+    const { form } = applyAutoLocations(
+      makeForm(), () => ({ location: '', coordinates: '39.65432, -104.91234' }), new Map(),
+    );
+    expect(form).toMatchObject({ location: '', coordinates: '39.65432, -104.91234' });
+  });
+
+  it('settles: applying the same guess twice changes nothing', () => {
+    const first = applyAutoLocations(makeForm(), suggestFor, new Map());
+    const second = applyAutoLocations(first.form, suggestFor, first.lastAuto);
+    expect(second.form).toBe(first.form);
+  });
+
   it('returns the very same form when there is nothing to fill', () => {
-    const full = makeForm({ location: 'Aurora' });
+    const full = makeForm({ location: 'Aurora', coordinates: '39.70000, -104.80000' });
     expect(applyAutoLocations(full, suggestFor, new Map([['primary', 'Aurora']])).form).toBe(full);
     expect(applyAutoLocations(makeForm(), () => null, new Map()).form.location).toBe('');
   });

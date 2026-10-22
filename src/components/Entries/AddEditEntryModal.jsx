@@ -268,22 +268,34 @@ export function applyAutoLocations(form, suggestFor, lastAuto, { isEdit = false,
   const guesses = new Map(lastAuto);
 
   const candidates = [];
-  if (!isEdit) candidates.push({ id: 'primary', restaurantName: form.restaurantName, location: form.location });
+  if (!isEdit) {
+    candidates.push({
+      id: 'primary', restaurantName: form.restaurantName, location: form.location, coordinates: form.coordinates,
+    });
+  }
   for (const r of form.additionalRatings) {
-    if (!r.originalUuid) candidates.push({ id: r.id, restaurantName: r.restaurantName, location: r.location });
+    if (!r.originalUuid) {
+      candidates.push({ id: r.id, restaurantName: r.restaurantName, location: r.location, coordinates: r.coordinates });
+    }
   }
 
-  for (const { id, restaurantName, location } of candidates) {
+  for (const { id, restaurantName, location, coordinates } of candidates) {
     if (dismissed.has(id)) continue;
     const current = String(location ?? '');
     if (current !== '' && current !== guesses.get(id)) continue;
     const guess = suggestFor(restaurantName || '');
-    if (!guess?.location || guess.location === current) continue;
-    next = applyLinkedChange(next, id, 'location', {
-      location: guess.location,
-      coordinates: guess.coordinates || '',
-    }, { userEdit: false });
-    guesses.set(id, guess.location);
+    if (!guess) continue;
+    const name = guess.location || '';
+    const point = guess.coordinates || '';
+    if (!name && !point) continue;
+    // Same as what's there already: say nothing, or re-applying would hand
+    // back a new form on every render and never settle.
+    if (name === current && point === String(coordinates ?? '')) continue;
+    // A point with no name records where you were and leaves the field alone.
+    next = applyLinkedChange(next, id, 'location',
+      name ? { location: name, coordinates: point } : { coordinates: point },
+      { userEdit: false });
+    guesses.set(id, name);
   }
   return { form: next, lastAuto: guesses };
 }
