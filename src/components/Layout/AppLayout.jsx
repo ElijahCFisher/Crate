@@ -147,6 +147,15 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     }
   }, [picturesFolderId, sharedWith]);
 
+  // …and into the data file: once the ratings move from the CSV to a Sheet,
+  // everyone the CSV was shared with gets the Sheet too.
+  useEffect(() => {
+    if (!dataFileId || !sharedWith?.length) return;
+    for (const person of sharedWith) {
+      if (person?.email) shareFile(dataFileId, person.email).catch(() => {});
+    }
+  }, [dataFileId, sharedWith]);
+
   // Detect ?followRequest= in the URL on load (and after auth)
   useEffect(() => {
     if (!auth.isAuthenticated || !dataFileId) return;

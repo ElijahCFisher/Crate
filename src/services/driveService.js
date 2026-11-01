@@ -66,7 +66,7 @@ async function driveFetch(url, options = {}, retry = true) {
   return res;
 }
 
-async function driveRequest(url, options = {}) {
+export async function driveRequest(url, options = {}) {
   const res = await driveFetch(url, options);
   if (!res.ok && res.status !== 412) {
     const body = await res.text().catch(() => '');
@@ -275,8 +275,13 @@ export async function shareFile(fileId, email) {
   return res.json();
 }
 
+/**
+ * Ratings files shared with you: the CSV by its name, or a data Sheet by the
+ * property the app tags it with (its name is free to change).
+ */
 export async function listSharedFoodRatingFiles(fileName) {
-  const q = `name='${fileName}' and sharedWithMe=true and trashed=false`;
+  const q = `(name='${fileName}' or properties has { key='crate' and value='data' })`
+    + ' and sharedWithMe=true and trashed=false';
   const res = await driveRequest(
     `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name,sharingUser)&spaces=drive`
   );

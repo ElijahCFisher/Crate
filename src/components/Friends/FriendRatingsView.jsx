@@ -5,8 +5,7 @@ import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { readFile } from '../../services/driveService';
-import { parseCombined } from '../../services/csvService';
+import { readFriendRatings } from '../../services/dataService';
 import EntryTable from '../Entries/EntryTable';
 
 export default function FriendRatingsView({ friend, onBack }) {
@@ -20,10 +19,9 @@ export default function FriendRatingsView({ friend, onBack }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    readFile(friend.fileId)
-      .then(({ content }) => {
+    readFriendRatings(friend)
+      .then((combined) => {
         if (cancelled) return;
-        const combined = parseCombined(content);
         const all = Array.from(combined.values());
         setCategories(all.filter((e) => e.entryType === 'category'));
         setFoodEntries(all.filter((e) => e.entryType === 'food'));
@@ -35,7 +33,7 @@ export default function FriendRatingsView({ friend, onBack }) {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [friend?.fileId]);
+  }, [friend?.fileId, friend?.email]);
 
   return (
     <Box>

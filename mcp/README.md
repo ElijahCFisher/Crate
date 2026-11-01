@@ -1,7 +1,8 @@
 # Crate MCP server
 
 Lets an MCP client (e.g. Claude Code) search, add, and update ratings in your
-Crate food-rating data — same Google Drive files the web app uses, via the
+Crate food-rating data — same Google Sheets the web app uses (or its older CSV files, until those are
+copied over), via the
 same `crate-server` Worker backend for auth.
 
 ## Setup

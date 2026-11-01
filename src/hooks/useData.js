@@ -12,7 +12,7 @@ import {
   createModificationChange,
   createDeletionChange,
 } from '../utils/changelogUtils';
-import { API_BASE, DRIVE_FOLDER_NAME, DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME, DRIVE_PICTURES_FOLDER_NAME } from '../config';
+import { API_BASE, DRIVE_FOLDER_NAME, DRIVE_PICTURES_FOLDER_NAME } from '../config';
 import { makeToTryItem, TOTRY_TYPE } from '../utils/toTryUtils';
 
 // ── Offline persistence helpers ───────────────────────────────────────────────
@@ -102,6 +102,8 @@ export function useData(isAuthenticated) {
 
   const combinedFileIdRef  = useRef(null);
   const changelogFileIdRef = useRef(null);
+  // 'sheets' or 'csv' — which kind of file the ids above are (dataService.openStorage).
+  const backendRef         = useRef(null);
   const combinedRef        = useRef(combined);
   const changelogRef       = useRef(changelog);
   // isOfflineRef mirrors isOffline so stale useCallback closures always read
@@ -124,6 +126,14 @@ export function useData(isAuthenticated) {
   useEffect(() => { combinedRef.current        = combined;        }, [combined]);
   useEffect(() => { changelogRef.current       = changelog;       }, [changelog]);
   useEffect(() => { isOfflineRef.current       = isOffline;       }, [isOffline]);
+
+  function currentFileIds() {
+    return {
+      backend: backendRef.current,
+      combinedFileId: combinedFileIdRef.current,
+      changelogFileId: changelogFileIdRef.current,
+    };
+  }
 
   // ── Reachability ────────────────────────────────────────────────────────────
 
@@ -162,7 +172,7 @@ export function useData(isAuthenticated) {
     const lid = changelogFileIdRef.current;
     if (cid && lid) {
       // fileIds already set — went offline mid-session, just flush the queue.
-      flushQueue(cid, lid);
+      flushQueue(currentFileIds());
     } else if (initRef.current) {
       // Page was loaded while offline; init() never got a fileId.
       initRef.current();
@@ -196,6 +206,7 @@ export function useData(isAuthenticated) {
       setPicturesFolderId(null);
       combinedFileIdRef.current = null;
       changelogFileIdRef.current = null;
+      backendRef.current = null;
       return;
     }
 
@@ -213,54 +224,67 @@ export function useData(isAuthenticated) {
         const resolvedFolderId = await driveService.findOrCreateFolder(DRIVE_FOLDER_NAME);
         setFolderId(resolvedFolderId);
 
-        const [combinedId, changelogId, picsFolderId] = await Promise.all([
-          driveService.findOrCreateFile(resolvedFolderId, DRIVE_FILE_NAME),
-          driveService.findOrCreateFile(resolvedFolderId, DRIVE_CHANGELOG_FILE_NAME),
+        const [storage, picsFolderId] = await Promise.all([
+          dataService.openStorage(resolvedFolderId),
           driveService.findOrCreateSubfolder(resolvedFolderId, DRIVE_PICTURES_FOLDER_NAME),
         ]);
+        const { combinedFileId: combinedId, changelogFileId: changelogId } = storage;
+        const fids = { backend: storage.backend, combinedFileId: combinedId, changelogFileId: changelogId };
         setPicturesFolderId(picsFolderId);
+        backendRef.current = storage.backend;
         setCombinedFileId(combinedId);  combinedFileIdRef.current  = combinedId;
         setChangelogFileId(changelogId); changelogFileIdRef.current = changelogId;
 
-        const [
-          { content: combinedContent, etag: combinedEtag },
-          { content: changelogContent, etag: changelogEtag },
-        ] = await Promise.all([
-          driveService.readFile(combinedId),
-          driveService.readFile(changelogId),
-        ]);
-
-        // Another init() started while we were awaiting — its result is newer,
-        // so silently abandon this one.
-        if (myCount !== initCounterRef.current) return;
-
-        // ── Migration: old single-file format → two separate files ───────────
-        // The old combined file contained both sections separated by markers.
-        // Write changelog BEFORE combined. If the combined write fails later,
-        // the combined file retains its old format so migration retries safely
-        // on the next load (changelog write is idempotent).
-        if (combinedContent.includes('SECTION,COMBINED')) {
-          const migrated = csvService.parse(combinedContent);
-          const clResult = await driveService.writeFile(
-            changelogId, csvService.generateChangelog(migrated), changelogEtag,
-          );
+        let data;
+        let etags = {};
+        if (storage.backend === 'sheets') {
+          // Anything a device or MCP server still on the CSV files wrote since
+          // they were copied comes over first.
+          const caughtUp = await dataService.catchUpFromCsv(storage, resolvedFolderId);
+          data = caughtUp?.data ?? await dataService.readData(fids);
           if (myCount !== initCounterRef.current) return;
-          if (!clResult.ok) throw new Error('Migration failed (changelog). Please refresh.');
-          const cmResult = await driveService.writeFile(
-            combinedId, csvService.generateCombined(migrated), combinedEtag,
-          );
+        } else {
+          const [
+            { content: combinedContent, etag: combinedEtag },
+            { content: changelogContent, etag: changelogEtag },
+          ] = await Promise.all([
+            driveService.readFile(combinedId),
+            driveService.readFile(changelogId),
+          ]);
+
+          // Another init() started while we were awaiting — its result is newer,
+          // so silently abandon this one.
           if (myCount !== initCounterRef.current) return;
-          if (!cmResult.ok) throw new Error('Migration failed (combined). Please refresh.');
-          applyResult(migrated);
-          markOnline();
-          if (loadQueue().length) flushQueue(combinedId, changelogId);
-          return;
+
+          // ── Migration: old single-file format → two separate files ─────────
+          // The old combined file contained both sections separated by markers.
+          // Write changelog BEFORE combined. If the combined write fails later,
+          // the combined file retains its old format so migration retries safely
+          // on the next load (changelog write is idempotent).
+          if (combinedContent.includes('SECTION,COMBINED')) {
+            const migrated = csvService.parse(combinedContent);
+            const clResult = await driveService.writeFile(
+              changelogId, csvService.generateChangelog(migrated), changelogEtag,
+            );
+            if (myCount !== initCounterRef.current) return;
+            if (!clResult.ok) throw new Error('Migration failed (changelog). Please refresh.');
+            const cmResult = await driveService.writeFile(
+              combinedId, csvService.generateCombined(migrated), combinedEtag,
+            );
+            if (myCount !== initCounterRef.current) return;
+            if (!cmResult.ok) throw new Error('Migration failed (combined). Please refresh.');
+            applyResult(migrated);
+            markOnline();
+            if (loadQueue().length) flushQueue(fids);
+            return;
+          }
+
+          data = {
+            combined:  csvService.parseCombined(combinedContent),
+            changelog: csvService.parseChangelog(changelogContent),
+          };
+          etags = { combined: combinedEtag, changelog: changelogEtag };
         }
-
-        const data = {
-          combined:  csvService.parseCombined(combinedContent),
-          changelog: csvService.parseChangelog(changelogContent),
-        };
 
         // ── First-time sync: Drive is empty but cache has data ────────────────
         // This happens on first sign-in, if the Drive file was deleted, or if
@@ -274,12 +298,9 @@ export function useData(isAuthenticated) {
             // changelog entries (changeMethod, original timestamps) exactly as
             // they were. This handles: first sign-in, CSV deleted from Drive,
             // or Drive file lost.
-            const [cmResult, clResult] = await Promise.all([
-              driveService.writeFile(combinedId,  csvService.generateCombined(cached),  combinedEtag),
-              driveService.writeFile(changelogId, csvService.generateChangelog(cached), changelogEtag),
-            ]);
+            const seeded = await dataService.replaceData(fids, cached, etags);
             if (myCount !== initCounterRef.current) return;
-            if (!cmResult.ok || !clResult.ok) {
+            if (!seeded) {
               throw new Error('Failed to seed Drive from cache.');
             }
             applyResult(cached);
@@ -328,7 +349,7 @@ export function useData(isAuthenticated) {
           saveWal([]);
           saveQueue([...walOps, ...loadQueue()]);
         }
-        if (loadQueue().length) flushQueue(combinedId, changelogId);
+        if (loadQueue().length) flushQueue(fids);
       } catch (err) {
         if (myCount !== initCounterRef.current) return;
         if (driveService.isAuthError(err)) {
@@ -412,8 +433,7 @@ export function useData(isAuthenticated) {
 
   // ── Queue flush ─────────────────────────────────────────────────────────────
 
-  async function flushQueue(combinedId, changelogId) {
-    const fids = { combinedFileId: combinedId, changelogFileId: changelogId };
+  async function flushQueue(fids) {
     const queue = loadQueue();
     if (!queue.length) return;
     setSyncing(true);
@@ -451,7 +471,7 @@ export function useData(isAuthenticated) {
   // Callers should `await withSync(...)`.
 
   async function withSync(fn, queueOp, localApply) {
-    const fids = { combinedFileId: combinedFileIdRef.current, changelogFileId: changelogFileIdRef.current };
+    const fids = currentFileIds();
     if (!fids.combinedFileId && !isOffline) throw new Error('No file loaded');
 
     if (!navigator.onLine || isOffline) {
@@ -515,7 +535,7 @@ export function useData(isAuthenticated) {
       return;
     }
 
-    const fids = { combinedFileId: combinedFileIdRef.current, changelogFileId: changelogFileIdRef.current };
+    const fids = currentFileIds();
     if (!fids.combinedFileId) {
       // No Drive file yet — user isn't signed in, or init() hasn't completed.
       // Enqueue the op so it syncs automatically once we have a file ID

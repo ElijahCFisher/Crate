@@ -58,7 +58,7 @@ async function driveFetch(url, options = {}, retry = true) {
   return res;
 }
 
-async function driveRequest(url, options = {}) {
+export async function driveRequest(url, options = {}) {
   const res = await driveFetch(url, options);
   if (!res.ok && res.status !== 412) {
     const body = await res.text().catch(() => '');

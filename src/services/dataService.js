@@ -2,6 +2,8 @@ import { v4 as uuidv4 } from 'uuid';
 import * as driveService from './driveService';
 import * as csvService from './csvService';
 import * as settingsService from './settingsService';
+import { createSheetStore } from './sheetStore';
+import { DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME } from '../config';
 import {
   createAdditionChange,
   createModificationChange,
@@ -15,6 +17,10 @@ function sleep(ms) {
 }
 
 const SYNC_TIMEOUT_MS = 30_000;
+
+// driveRequest is looked up per call, so a test that mocks driveService
+// without it still loads this module.
+const sheets = createSheetStore((url, options) => driveService.driveRequest(url, options));
 
 function parseFieldValue(fieldName, value) {
   switch (fieldName) {
@@ -71,10 +77,14 @@ function entryFromAdditionChange(change) {
 
 /**
  * Core retry loop: read Drive → apply → write with version check.
- * Reads/writes combined and changelog files in parallel.
+ * Reads/writes combined and changelog files in parallel. With
+ * `fileIds.backend === 'sheets'` the Google Sheets store does the same job
+ * by appending and editing cells instead.
  * Returns { data: { combined, changelog }, ...extra } where extra comes from caller.
  */
-async function applyChanges({ combinedFileId, changelogFileId }, changes, applyFn) {
+async function applyChanges(fileIds, changes, applyFn) {
+  if (fileIds.backend === 'sheets') return sheets.applyChanges(fileIds, changes, applyFn);
+  const { combinedFileId, changelogFileId } = fileIds;
   const deadline = Date.now() + SYNC_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const [
@@ -364,21 +374,7 @@ export async function batchModifyScores(fileIds, updates, changeMethod) {
  * idempotent.
  */
 export async function importChangelog(fileIds, incomingChanges) {
-  const deadline = Date.now() + SYNC_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const [
-      { content: combinedContent, etag: combinedEtag },
-      { content: changelogContent, etag: changelogEtag },
-    ] = await Promise.all([
-      driveService.readFile(fileIds.combinedFileId),
-      driveService.readFile(fileIds.changelogFileId),
-    ]);
-
-    const data = {
-      combined: csvService.parseCombined(combinedContent),
-      changelog: csvService.parseChangelog(changelogContent),
-    };
-
+  return applyChanges(fileIds, [], (data) => {
     const existingChangeUuids = new Set(data.changelog.map((change) => change.changeUuid));
     const changes = incomingChanges.filter((change) =>
       change.changeUuid && change.entryUuid && !existingChangeUuids.has(change.changeUuid)
@@ -412,13 +408,81 @@ export async function importChangelog(fileIds, incomingChanges) {
       }
     }
 
-    const [combinedResult, changelogResult] = await Promise.all([
-      driveService.writeFile(fileIds.combinedFileId, csvService.generateCombined(data), combinedEtag),
-      driveService.writeFile(fileIds.changelogFileId, csvService.generateChangelog(data), changelogEtag),
-    ]);
-    if (combinedResult.ok && changelogResult.ok) return { data, importedChanges: changes.length };
-    if (combinedResult.status === 412 || changelogResult.status === 412) { await sleep(1000); continue; }
-    throw new Error('Drive write failed unexpectedly.');
+    return { importedChanges: changes.length };
+  });
+}
+
+// ── Where the data lives ──────────────────────────────────────────────────────
+
+/**
+ * The file ids every other call here takes: the Google Sheets copy (made from
+ * the CSV files the first time), or the CSV files themselves if that copy
+ * can't be made yet. Returns { backend, combinedFileId, changelogFileId, … }.
+ */
+export async function openStorage(folderId) {
+  const storage = await sheets.resolveStorage(folderId, {
+    data: DRIVE_FILE_NAME,
+    changelog: DRIVE_CHANGELOG_FILE_NAME,
+  });
+  if (storage) return storage;
+  const [combinedFileId, changelogFileId] = await Promise.all([
+    driveService.findOrCreateFile(folderId, DRIVE_FILE_NAME),
+    driveService.findOrCreateFile(folderId, DRIVE_CHANGELOG_FILE_NAME),
+  ]);
+  return { backend: 'csv', combinedFileId, changelogFileId };
+}
+
+/** Everything in the sheets, as { combined, changelog }. */
+export async function readData(fileIds) {
+  return (await sheets.readData(fileIds)).data;
+}
+
+/**
+ * Overwrite the stored data with `data` wholesale. On the CSVs, `etags` guard
+ * the write the same way every other write is guarded; returns whether it
+ * went through.
+ */
+export async function replaceData(fileIds, data, etags = {}) {
+  if (fileIds.backend === 'sheets') {
+    await sheets.replaceData(fileIds, data);
+    return true;
   }
-  throw new Error('Sync failed after 30 seconds. Please try again.');
+  const [combinedResult, changelogResult] = await Promise.all([
+    driveService.writeFile(fileIds.combinedFileId, csvService.generateCombined(data), etags.combined),
+    driveService.writeFile(fileIds.changelogFileId, csvService.generateChangelog(data), etags.changelog),
+  ]);
+  return combinedResult.ok && changelogResult.ok;
+}
+
+/**
+ * Bring into the sheets anything written to the changelog CSV since it was
+ * copied — by a device or MCP server still on the old files. Replays like a
+ * changelog import, so it's safe to repeat. Returns that import's result, or
+ * null when there was nothing to bring over (or it couldn't be checked: the
+ * sheets are still right, just possibly missing those late changes until the
+ * next load).
+ */
+export async function catchUpFromCsv(storage, folderId) {
+  try {
+    const pending = await sheets.csvChangesSince(storage, folderId, DRIVE_CHANGELOG_FILE_NAME);
+    if (!pending) return null;
+    const result = await importChangelog(storage, pending.changes);
+    await sheets.markCsvRead(storage, pending.version);
+    return result;
+  } catch (err) {
+    console.warn('Could not check the old changelog CSV for late changes:', err);
+    return null;
+  }
+}
+
+/**
+ * A followed friend's ratings. Prefers their Sheet when they've moved to one
+ * and shared it, since the CSV they first shared stops changing then.
+ */
+export async function readFriendRatings({ fileId, email }) {
+  const sheetId = email ? await sheets.findSharedDataSheet(email) : null;
+  if (sheetId) return sheets.readCombined(sheetId);
+  if (await sheets.isSpreadsheet(fileId)) return sheets.readCombined(fileId);
+  const { content } = await driveService.readFile(fileId);
+  return csvService.parseCombined(content);
 }

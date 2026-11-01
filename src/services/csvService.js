@@ -8,14 +8,14 @@ const CHANGELOG_MARKER = 'SECTION,CHANGELOG';
 // to the metre, while Location stays the name you'd write — the one that groups
 // and filters. All four are appended, so files written before they existed
 // parse the same, and a parse of those files gives blanks.
-const COMBINED_FIELDS = [
+export const COMBINED_FIELDS = [
   'UUID', 'Entry Type', 'Identicals', 'Categories', 'Rating Category',
   'Restaurant Name', 'Specifier', 'Location', 'Score', 'Date Rated',
   'Additional Information', 'Picture', 'Linked Fields',
   'Status', 'Tags', 'Tried Ratings', 'Coordinates',
 ];
 
-const CHANGELOG_FIELDS = [
+export const CHANGELOG_FIELDS = [
   'Entry UUID', 'Change UUID', 'Change Type', 'Field Name', 'Value',
   'Identicals', 'Categories', 'Rating Category', 'Restaurant Name',
   'Specifier', 'Location', 'Score', 'Date Rated', 'Additional Information',
@@ -159,7 +159,7 @@ function parseNum(val, parser) {
   return isNaN(n) ? null : n;
 }
 
-function rowToEntry(row) {
+export function rowToEntry(row) {
   return {
     uuid: row['UUID'] || '',
     entryType: row['Entry Type'] || 'food',
@@ -181,7 +181,7 @@ function rowToEntry(row) {
   };
 }
 
-function entryToRow(entry) {
+export function entryToRow(entry) {
   return {
     'UUID': entry.uuid,
     'Entry Type': entry.entryType || 'food',
@@ -203,7 +203,7 @@ function entryToRow(entry) {
   };
 }
 
-function rowToChange(row) {
+export function rowToChange(row) {
   return {
     entryUuid: row['Entry UUID'] || '',
     changeUuid: row['Change UUID'] || '',
@@ -231,7 +231,7 @@ function rowToChange(row) {
   };
 }
 
-function changeToRow(change) {
+export function changeToRow(change) {
   return {
     'Entry UUID': change.entryUuid || '',
     'Change UUID': change.changeUuid || '',

@@ -8,6 +8,8 @@ import { v4 as uuidv4 } from 'uuid';
 import * as driveService from './driveService.js';
 import * as csvService from '../../src/services/csvService.js';
 import * as settingsService from './settingsService.js';
+import { DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME } from './config.js';
+import { createSheetStore } from '../../src/services/sheetStore.js';
 import {
   createAdditionChange,
   createModificationChange,
@@ -21,6 +23,8 @@ function sleep(ms) {
 }
 
 const SYNC_TIMEOUT_MS = 30_000;
+
+const sheets = createSheetStore(driveService.driveRequest);
 
 function parseFieldValue(fieldName, value) {
   switch (fieldName) {
@@ -42,7 +46,9 @@ function parseFieldValue(fieldName, value) {
   }
 }
 
-async function applyChanges({ combinedFileId, changelogFileId }, changes, applyFn) {
+async function applyChanges(fileIds, changes, applyFn) {
+  if (fileIds.backend === 'sheets') return sheets.applyChanges(fileIds, changes, applyFn);
+  const { combinedFileId, changelogFileId } = fileIds;
   const deadline = Date.now() + SYNC_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const [
@@ -87,8 +93,26 @@ const ENTRY_DEFAULTS = {
 
 const CHANGE_METHOD = 'MCP tool';
 
+/**
+ * Same as the app's openStorage: the Google Sheets copy of the data (made
+ * from the CSV files the first time), or the CSVs if it can't be made yet.
+ */
+export async function openStorage(folderId) {
+  const storage = await sheets.resolveStorage(folderId, {
+    data: DRIVE_FILE_NAME,
+    changelog: DRIVE_CHANGELOG_FILE_NAME,
+  });
+  if (storage) return storage;
+  const [combinedFileId, changelogFileId] = await Promise.all([
+    driveService.findOrCreateFile(folderId, DRIVE_FILE_NAME),
+    driveService.findOrCreateFile(folderId, DRIVE_CHANGELOG_FILE_NAME),
+  ]);
+  return { backend: 'csv', combinedFileId, changelogFileId };
+}
+
 /** Read the current combined dataset (no changelog replay needed for reads). */
 export async function readCombined(fileIds) {
+  if (fileIds.backend === 'sheets') return sheets.readCombined(fileIds.combinedFileId);
   const { content } = await driveService.readFile(fileIds.combinedFileId);
   return csvService.parseCombined(content);
 }

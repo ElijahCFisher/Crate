@@ -52,16 +52,36 @@ what they test.
 
 On first sign-in the app creates a **Food Ratings** folder in your Drive:
 
-- `food-ratings-data.csv` — current state, one row per entry (ratings *and*
-  categories, distinguished by `Entry Type`)
-- `food-ratings-changelog.csv` — append-only log of every add/modify/delete,
-  which is what makes multi-device sync and changelog import work
+- **Food Ratings Data** (Google Sheet) — current state, one row per entry
+  (ratings, categories and to-try items, distinguished by `Entry Type`)
+- **Food Ratings Changelog** (Google Sheet) — append-only log of every
+  add/modify/delete, which is what makes multi-device sync and changelog import
+  work
 - `SettingsEtc.json` — bulk-add groups, friends, notes, preferences
 - `Pictures/` — uploaded photos, referenced by file ID
 
-Writes use optimistic concurrency (a `version` etag plus a retry loop), so
-editing from two devices at once won't clobber. Offline edits go to a
-write-ahead log in `localStorage` and replay on reconnect.
+A change appends a row to the changelog and edits only the cells it changed in
+the data sheet, through the Sheets API. Rows are found by UUID and columns by
+header name, so you can add your own columns or edit cells by hand. The app
+finds the two sheets by a Drive property, not by name, so renaming them is
+fine too. Offline edits go to a write-ahead log in `localStorage` and replay on
+reconnect.
+
+**Older data: the CSV files.** Before the Sheets, data lived in
+`food-ratings-data.csv` and `food-ratings-changelog.csv` in the same folder.
+The first time the app (or the MCP server) loads, it copies them into the
+Sheets and switches over (`src/services/sheetStore.js`). The CSVs are never
+deleted or written again. If something still on the old version writes to the
+changelog CSV afterwards, the next load replays those changes into the Sheets.
+If the copy can't be made, for example because the Sheets API isn't enabled,
+the app keeps using the CSVs exactly as before and tries again on the next
+load. When you move to the Sheets, the people you share with get the data
+Sheet shared with them too, and following a friend reads their Sheet once they
+have one.
+
+**Sheets API:** it has to be enabled in the Google Cloud project that owns the
+OAuth client (APIs & Services → Library → Google Sheets API → Enable). No new
+scope is needed, because the existing `drive` scope covers it.
 
 ## Layout
 
@@ -69,13 +89,15 @@ write-ahead log in `localStorage` and replay on reconnect.
 src/
   components/     UI, grouped by feature (Entries, Categories, Filters, Friends…)
   hooks/          useData — all CRUD + sync + offline queue lives here
-  services/       csvService (parse/serialize), dataService (Drive writes), driveService, auth
+  services/       csvService (schema, parse/serialize), sheetStore (Sheets storage + CSV migration),
+                  dataService (writes), driveService, auth
   utils/          filter logic, changelog helpers, field links, math/date helpers
 mcp/              MCP server — see mcp/README.md
 ```
 
 `src/services/csvService.js` is the schema: the `COMBINED_FIELDS` and
-`CHANGELOG_FIELDS` arrays are the CSV columns. Adding a column means touching
+`CHANGELOG_FIELDS` arrays are the columns, for both the Sheets and the CSVs (a
+Sheet missing a new column gets it added on the next write). Adding a column means touching
 both those arrays *and* all four row converters in that file, plus
 `parseFieldValue` in `dataService.js` — otherwise the field won't survive a
 changelog replay.

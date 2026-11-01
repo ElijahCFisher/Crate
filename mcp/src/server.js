@@ -5,7 +5,7 @@ import { z } from 'zod';
 import * as driveService from './driveService.js';
 import * as dataService from './dataService.js';
 import * as settingsService from './settingsService.js';
-import { DRIVE_FOLDER_NAME, DRIVE_FILE_NAME, DRIVE_CHANGELOG_FILE_NAME } from './config.js';
+import { DRIVE_FOLDER_NAME } from './config.js';
 import { roundToValidScore, VALID_SCORES } from '../../src/utils/scaleUtils.js';
 import { applyFilters } from '../../src/utils/filterLogic.js';
 import { TOTRY_TYPE, findSimilarItems, makeToTryItem, statusOf } from '../../src/utils/toTryUtils.js';
@@ -17,12 +17,11 @@ function getFileIds() {
   if (!fileIdsPromise) {
     fileIdsPromise = (async () => {
       const folderId = await driveService.findOrCreateFolder(DRIVE_FOLDER_NAME);
-      const [combinedFileId, changelogFileId, settingsFileId] = await Promise.all([
-        driveService.findOrCreateFile(folderId, DRIVE_FILE_NAME),
-        driveService.findOrCreateFile(folderId, DRIVE_CHANGELOG_FILE_NAME),
+      const [storage, settingsFileId] = await Promise.all([
+        dataService.openStorage(folderId),
         settingsService.getOrCreateSettingsFile(folderId),
       ]);
-      return { combinedFileId, changelogFileId, settingsFileId };
+      return { ...storage, settingsFileId };
     })().catch((err) => { fileIdsPromise = null; throw err; });
   }
   return fileIdsPromise;
