@@ -214,6 +214,40 @@ export async function modifyEntry(fileIds, entryUuid, updates) {
   });
 }
 
+/**
+ * Modify many entries in one write. `edits` is [{ uuid, updates }], the same
+ * shape modifyEntry takes per entry.
+ */
+export async function modifyEntries(fileIds, edits) {
+  const now = Date.now();
+  const changes = [];
+  for (const { uuid, updates } of edits) {
+    for (const [field, value] of Object.entries(updates)) {
+      const change = createModificationChange(uuid, field, serializeFieldValue(field, value));
+      change.dateOfChange = now + changes.length;
+      changes.push(change);
+    }
+  }
+
+  return applyChanges(fileIds, changes, (data) => {
+    const moved = [];
+    for (const change of changes) {
+      const entry = data.combined.get(change.entryUuid);
+      if (!entry || !isLatestChangeForField(data.changelog, change)) continue;
+      data.combined.set(change.entryUuid, {
+        ...entry,
+        [change.fieldName]: parseFieldValue(change.fieldName, change.value),
+      });
+      if (change.fieldName === 'ratingCategory') moved.push(change.entryUuid);
+    }
+    for (const uuid of moved) {
+      const entry = data.combined.get(uuid);
+      data.combined.set(uuid, { ...entry, categories: computeCategories(entry.ratingCategory, data.combined) });
+    }
+    return {};
+  });
+}
+
 export async function deleteEntry(fileIds, entryUuid) {
   const change = createDeletionChange(entryUuid);
   return applyChanges(fileIds, [change], (data) => {

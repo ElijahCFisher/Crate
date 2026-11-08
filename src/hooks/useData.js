@@ -338,6 +338,11 @@ export function useData(isAuthenticated) {
           } else if (op.type === 'modify') {
             const e = data.combined.get(op.uuid);
             if (e) data.combined.set(op.uuid, { ...e, ...op.updates });
+          } else if (op.type === 'modifyMany') {
+            for (const { uuid, updates } of op.edits || []) {
+              const e = data.combined.get(uuid);
+              if (e) data.combined.set(uuid, { ...e, ...updates });
+            }
           } else if (op.type === 'delete') {
             data.combined.delete(op.uuid);
           }
@@ -446,6 +451,7 @@ export function useData(isAuthenticated) {
         else if (op.type === 'addCategory') result = await dataService.addCategory(fids, op.categoryData);
         else if (op.type === 'addWithLinks') result = await dataService.addEntriesWithLinks(fids, op.entries, op.existingUuids);
         else if (op.type === 'modify')      result = await dataService.modifyEntry(fids, op.uuid, op.updates);
+        else if (op.type === 'modifyMany')  result = await dataService.modifyEntries(fids, op.edits);
         else if (op.type === 'delete')      result = await dataService.deleteEntry(fids, op.uuid);
         else if (op.type === 'batchModify') result = await dataService.batchModifyScores(fids, new Map(op.updates), op.changeMethod);
         if (result?.data) applyResult(result.data);
@@ -838,6 +844,49 @@ export function useData(isAuthenticated) {
   }, []);
 
   /**
+   * Modify many entries at once (bulk edit). Same as modifyEntry per entry,
+   * but saved to Drive as one write. `edits` is [{ uuid, updates }].
+   */
+  const modifyEntries = useCallback((edits) => {
+    if (!edits.length) return;
+    const now = Date.now();
+    const changes = [];
+    for (const { uuid, updates } of edits) {
+      for (const [field, value] of Object.entries(updates)) {
+        const change = createModificationChange(uuid, field, dataService.serializeFieldValue(field, value));
+        change.dateOfChange = now + changes.length;
+        changes.push(change);
+      }
+    }
+    const newChangelog = [...changelogRef.current, ...changes];
+    changelogRef.current = newChangelog;
+
+    let newCombined;
+    setCombined((prev) => {
+      const next = new Map(prev);
+      for (const { uuid, updates } of edits) {
+        const e = next.get(uuid);
+        if (e) next.set(uuid, { ...e, ...updates });
+      }
+      for (const { uuid, updates } of edits) {
+        if (!('ratingCategory' in updates)) continue;
+        const e = next.get(uuid);
+        if (e) next.set(uuid, { ...e, categories: computeCategories(e.ratingCategory, next) });
+      }
+      newCombined = next;
+      return next;
+    });
+    setChangelog((prev) => [...prev, ...changes]);
+
+    withSyncBackground(
+      (fids) => dataService.modifyEntries(fids, edits),
+      { type: 'modifyMany', edits },
+      newCombined,
+      newChangelog,
+    );
+  }, []);
+
+  /**
    * Delete an entry. Applies locally immediately and syncs in the background.
    */
   const deleteEntry = useCallback((uuid) => {
@@ -1040,7 +1089,7 @@ export function useData(isAuthenticated) {
     clearLocalData, addToTryItems,
     fileId: combinedFileId, folderId, picturesFolderId, loading, syncing, syncError, setSyncError,
     isOffline, offlineReason, retryConnection, pendingCount,
-    addEntry, addEntryGroups, addEntriesWithLinks, addCategory, modifyEntry, deleteEntry,
+    addEntry, addEntryGroups, addEntriesWithLinks, addCategory, modifyEntry, modifyEntries, deleteEntry,
     applyRebalance,
     importCsv, exportCsv,
   };

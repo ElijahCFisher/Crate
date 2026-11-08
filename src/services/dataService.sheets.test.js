@@ -317,6 +317,28 @@ describe('writing to the sheets', () => {
     expect(column(sheetOf('changelog'), 'Value').at(-1)).toBe('9');
   });
 
+  it('saves a bulk edit of several entries in one write', async () => {
+    const log = sheetOf('changelog');
+    const before = log.rows.length;
+    const spy = vi.spyOn(google, 'request');
+
+    await dataService.modifyEntries(storage, [
+      { uuid: 'a', updates: { restaurantName: 'Olive Garden', score: '6' } },
+      { uuid: 'c', updates: { restaurantName: 'Olive Garden' } },
+    ]);
+
+    const data = sheetOf('data');
+    expect(rowFor(data, 'a')).toMatchObject({ 'Restaurant Name': 'Olive Garden', Score: '6' });
+    expect(rowFor(data, 'c')).toMatchObject({ 'Restaurant Name': 'Olive Garden', Score: '6' });
+    expect(rowFor(data, 'b')['Restaurant Name']).toBe('Taco Bell');
+    expect(log.rows.length - before).toBe(3);
+    expect(column(log, 'Field Name').slice(-3)).toEqual(['restaurantName', 'score', 'restaurantName']);
+    // One read of each sheet, not one per entry.
+    const reads = spy.mock.calls.filter(([url, opts]) => (!opts?.method || opts.method === 'GET') && url.includes('/values/'));
+    expect(reads.length).toBeLessThanOrEqual(4);
+    spy.mockRestore();
+  });
+
   it('removes a deleted entry\'s row and nothing else', async () => {
     await dataService.deleteEntry(storage, 'b');
 

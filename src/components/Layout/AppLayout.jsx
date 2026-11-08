@@ -68,6 +68,7 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
     addEntriesWithLinks,
     addCategory,
     modifyEntry,
+    modifyEntries,
     deleteEntry,
     applyRebalance,
     importCsv,
@@ -522,6 +523,7 @@ export default function AppLayout({ auth, data, onReauthenticate, onSignOut }) {
             searchVocabulary={searchVocabulary}
             onDelete={(entry) => setDeleteDialogEntry(entry)}
             onOpenFindReplace={() => setFindReplaceOpen(true)}
+            onBulkEdit={modifyEntries}
           />
         )}
 

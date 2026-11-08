@@ -16,6 +16,7 @@ import Chip from '@mui/material/Chip';
 import LinearProgress from '@mui/material/LinearProgress';
 import TablePagination from '@mui/material/TablePagination';
 import TextField from '@mui/material/TextField';
+import Checkbox from '@mui/material/Checkbox';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
@@ -27,6 +28,7 @@ import FilterBar from '../Filters/FilterBar';
 import ResultsMenu from './ResultsMenu';
 import DriveImage from '../DriveImage';
 import ImageLightbox from '../ImageLightbox';
+import BulkEditDialog from './BulkEditDialog';
 import {
   applyFilterLogicGroup,
   applyFilters,
@@ -66,8 +68,8 @@ const COLUMNS = [
   { id: 'additionalInfo', label: LABEL_NOTES, sortable: false },
 ];
 
-// Total column count = expand cell + picture cell + data columns + (optional) actions column
-const TOTAL_COLS = COLUMNS.length + 3;
+// Total column count = select cell + expand cell + picture cell + data columns + actions column
+const TOTAL_COLS = COLUMNS.length + 4;
 const TOTAL_COLS_READONLY = COLUMNS.length + 2;
 
 function ScoreBadge({ score, displayScore }) {
@@ -160,6 +162,7 @@ export default function EntryTable({
   onClone,
   onOpenCategory,
   onOpenFindReplace,
+  onBulkEdit,
   searchVocabulary = '',
   readOnly = false,
 }) {
@@ -171,6 +174,9 @@ export default function EntryTable({
   const [rowsPerPage, setRowsPerPage] = useState(() => loadPrefs()?.rowsPerPage || 20);
   const [showBaseScores, setShowBaseScores] = useState(() => loadPrefs()?.showBaseScores || false);
   const [lightboxPicture, setLightboxPicture] = useState(null);
+  const [selectedUuids, setSelectedUuids] = useState(() => new Set());
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const canSelect = !readOnly && !!onBulkEdit;
 
   useEffect(() => {
     savePrefs({ filters, filterLogic, order, orderBy, rowsPerPage, showBaseScores });
@@ -204,6 +210,26 @@ export default function EntryTable({
     () => new Map(foodEntries.map((e) => [e.uuid, e])),
     [foodEntries]
   );
+
+  // Forget selected entries that no longer exist (deleted, or synced away).
+  useEffect(() => {
+    setSelectedUuids((prev) => {
+      if (![...prev].some((uuid) => !allEntriesMap.has(uuid))) return prev;
+      return new Set([...prev].filter((uuid) => allEntriesMap.has(uuid)));
+    });
+  }, [allEntriesMap]);
+
+  const selectedEntries = useMemo(
+    () => [...selectedUuids].map((uuid) => allEntriesMap.get(uuid)).filter(Boolean),
+    [selectedUuids, allEntriesMap]
+  );
+
+  // Entries + categories, for following linked fields in a bulk edit.
+  const combinedForBulk = useMemo(() => {
+    const m = new Map(allEntriesMap);
+    for (const c of categories) m.set(c.uuid, c);
+    return m;
+  }, [allEntriesMap, categories]);
 
   const vocabulary = useMemo(
     () => (searchVocabulary.trim() ? parseSearchVocabulary(searchVocabulary) : null),
@@ -468,6 +494,36 @@ export default function EntryTable({
     }
   }
 
+  function toggleSelected(uuid) {
+    setSelectedUuids((prev) => {
+      const next = new Set(prev);
+      if (next.has(uuid)) next.delete(uuid);
+      else next.add(uuid);
+      return next;
+    });
+  }
+
+  const selectedInResults = useMemo(
+    () => searchedEntries.reduce((n, e) => n + (selectedUuids.has(e.uuid) ? 1 : 0), 0),
+    [searchedEntries, selectedUuids]
+  );
+  const allResultsSelected = searchedEntries.length > 0 && selectedInResults === searchedEntries.length;
+
+  /** The header box selects everything the filters found, across every page. */
+  function toggleSelectAllResults() {
+    setSelectedUuids((prev) => {
+      const next = new Set(prev);
+      if (allResultsSelected) for (const e of searchedEntries) next.delete(e.uuid);
+      else for (const e of searchedEntries) next.add(e.uuid);
+      return next;
+    });
+  }
+
+  function handleBulkApply(edits) {
+    onBulkEdit(edits);
+    setSelectedUuids(new Set());
+  }
+
   function toggleExpand(primaryUuid) {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
@@ -506,12 +562,24 @@ export default function EntryTable({
       <TableRow
         key={entry.uuid}
         hover
+        selected={canSelect && selectedUuids.has(entry.uuid)}
         onClick={(e) => handleRowClick(e, entry)}
         sx={{
           ...(!readOnly && { cursor: 'pointer' }),
           ...(!isPrimary && { bgcolor: 'action.hover', '& td': { borderBottom: 'none' } }),
         }}
       >
+        {canSelect && (
+          <TableCell padding="checkbox" sx={{ width: 36 }}>
+            <Checkbox
+              size="small"
+              checked={selectedUuids.has(entry.uuid)}
+              onChange={() => toggleSelected(entry.uuid)}
+              inputProps={{ 'aria-label': `Select ${[entry.restaurantName, entry.specifier].filter(Boolean).join(' ')}` }}
+            />
+          </TableCell>
+        )}
+
         {/* Expand/collapse toggle — only on primary rows that have identicals */}
         <TableCell sx={{ width: 36, p: 0, pl: 0.5 }}>
           {isPrimary && othersCount > 0 ? (
@@ -659,6 +727,32 @@ export default function EntryTable({
       />
       <ScoreSummary summary={scoreSummary} baseLabel={baseCategoryName} />
 
+      {canSelect && selectedUuids.size > 0 && (
+        <Paper
+          variant="outlined"
+          sx={{
+            display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap',
+            px: 2, py: 1, mb: 1, bgcolor: 'action.selected',
+          }}
+        >
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            {selectedUuids.size} selected
+          </Typography>
+          {selectedUuids.size > selectedInResults && (
+            <Typography variant="body2" color="text.secondary">
+              ({selectedUuids.size - selectedInResults} hidden by filters)
+            </Typography>
+          )}
+          <Box sx={{ flex: 1 }} />
+          <Button size="small" onClick={() => setSelectedUuids(new Set())}>
+            Clear
+          </Button>
+          <Button size="small" variant="contained" startIcon={<EditIcon />} onClick={() => setBulkEditOpen(true)}>
+            Edit selected
+          </Button>
+        </Paper>
+      )}
+
       {loading && <LinearProgress sx={{ mb: 1 }} />}
 
       <TableContainer
@@ -670,6 +764,20 @@ export default function EntryTable({
         <Table size="small">
           <TableHead>
             <TableRow>
+              {canSelect && (
+                <TableCell padding="checkbox" sx={{ width: 36 }}>
+                  <Tooltip title={allResultsSelected ? 'Unselect all results' : `Select all ${searchedEntries.length} results`}>
+                    <Checkbox
+                      size="small"
+                      checked={allResultsSelected}
+                      indeterminate={selectedInResults > 0 && !allResultsSelected}
+                      onChange={toggleSelectAllResults}
+                      disabled={searchedEntries.length === 0}
+                      inputProps={{ 'aria-label': 'Select all results' }}
+                    />
+                  </Tooltip>
+                </TableCell>
+              )}
               {/* Narrow expand-toggle column */}
               <TableCell sx={{ width: 36, p: 0 }} />
               {/* Picture thumbnail column */}
@@ -695,7 +803,7 @@ export default function EntryTable({
           <TableBody>
             {groups.length === 0 && !loading && (
               <TableRow>
-                <TableCell colSpan={readOnly ? TOTAL_COLS_READONLY : TOTAL_COLS} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={readOnly ? TOTAL_COLS_READONLY : TOTAL_COLS - (canSelect ? 0 : 1)} align="center" sx={{ py: 4 }}>
                   <Typography variant="body2" color="text.secondary">
                     {foodEntries.length === 0
                       ? 'No entries yet. Click "Add Entry" to get started.'
@@ -753,6 +861,17 @@ export default function EntryTable({
           rowsPerPageOptions={[10, 20, 50, 100]}
         />
       </Box>
+
+      {canSelect && (
+        <BulkEditDialog
+          open={bulkEditOpen}
+          onClose={() => setBulkEditOpen(false)}
+          selected={selectedEntries}
+          categories={categories}
+          combined={combinedForBulk}
+          onApply={handleBulkApply}
+        />
+      )}
 
       <ImageLightbox
         open={!!lightboxPicture}
