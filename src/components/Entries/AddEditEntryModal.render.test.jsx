@@ -108,4 +108,30 @@ describe('the entry dialog on screen', () => {
     expect(view.text()).not.toContain('39.76000, -104.98000');
     expect(view.find('input[value="Larimer, Denver"]')).toBeTruthy();
   });
+
+  it('clears the location from the button beside it without putting the cursor in the field', async () => {
+    const view = await render({ entry: savedEntry });
+    cleanup = view.cleanup;
+    const input = view.find('input[value="Larimer, Denver"]');
+    const clear = view.find('[aria-label="Clear location"]');
+    expect(clear).toBeTruthy();
+
+    const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    await act(async () => {
+      clear.dispatchEvent(mouseDown);
+      clear.click();
+    });
+
+    expect(mouseDown.defaultPrevented).toBe(true);
+    expect(input.value).toBe('');
+    expect(document.activeElement).not.toBe(input);
+    expect(view.text()).not.toContain('39.76000, -104.98000');
+    expect(view.find('[aria-label="Clear location"]')).toBeNull();
+  });
+
+  it('has no clear button while the location is empty', async () => {
+    const view = await render({});
+    cleanup = view.cleanup;
+    expect(view.find('[aria-label="Clear location"]')).toBeNull();
+  });
 });

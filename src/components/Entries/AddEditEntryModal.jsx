@@ -1462,6 +1462,9 @@ export default function AddEditEntryModal({
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
             <Autocomplete
               freeSolo
+              // The built-in clear button only shows on hover or focus and
+              // puts the cursor in the field; the one beside it does neither.
+              disableClearable
               sx={{ flex: 1, minWidth: 0 }}
               options={orderLocationSuggestions(locationSuggestions, restaurantLocations, values.restaurantName)}
               inputValue={values.location}
@@ -1473,6 +1476,20 @@ export default function AddEditEntryModal({
                   label={LABEL_LOCATION} placeholder="e.g. Denver" size="small" fullWidth />
               )}
             />
+            {values.location && (
+              <Tooltip title="Clear location">
+                <IconButton
+                  size="small"
+                  // Keep focus where it was, so clearing never opens the keyboard.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => changeLocation(ownerId, '')}
+                  aria-label="Clear location"
+                  sx={{ mt: 0.5 }}
+                >
+                  <ClearIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
             {locationEnabled && (
               <Tooltip title={onDevice ? 'Use where I am' : 'Use where this computer is'}>
                 <IconButton
