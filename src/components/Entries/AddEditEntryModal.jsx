@@ -263,6 +263,30 @@ export function applyLinkedChange(form, sourceId, field, patch, { userEdit = tru
  * `suggestFor(restaurantName)` gives the current best guess as
  * { location, coordinates }, or null for none yet.
  */
+/**
+ * Every rating on a form, by id. Text-mode commits mark all of these as not to
+ * be guessed at: the box says exactly what you meant, and a block with no
+ * location line means no location — not where you are now.
+ */
+export function ratingIdsOf(form) {
+  return ['primary', ...form.additionalRatings.map((r) => r.id)];
+}
+
+/**
+ * The form as the text box should show it: a location that is still only a
+ * guess (`lastAuto` holds the guesses by rating id) isn't something you wrote,
+ * so it isn't written into the box.
+ */
+export function withoutGuessedLocations(form, lastAuto) {
+  const isGuess = (id, location) => !!location && lastAuto.get(id) === location;
+  return {
+    ...form,
+    ...(isGuess('primary', form.location) ? { location: '', coordinates: '' } : {}),
+    additionalRatings: form.additionalRatings.map((r) =>
+      isGuess(r.id, r.location) ? { ...r, location: '', coordinates: '' } : r),
+  };
+}
+
 export function applyAutoLocations(form, suggestFor, lastAuto, { isEdit = false, dismissed = new Set() } = {}) {
   let next = form;
   const guesses = new Map(lastAuto);
@@ -1108,7 +1132,7 @@ export default function AddEditEntryModal({
 
   /** Render the current ratings into the box and remember what each line was. */
   function enterTextMode() {
-    const lines = generateTextLines(formToRatings(form), categories);
+    const lines = generateTextLines(formToRatings(withoutGuessedLocations(form, lastGuessRef.current)), categories);
     const rendered = lines.map((line) => line.text).join('\n');
     textBaselineRef.current = lines;
     textRef.current = rendered;
@@ -1130,12 +1154,11 @@ export default function AddEditEntryModal({
     textDirtyRef.current = false;
     setTextErrors(result.errors);
     setTextWarnings(result.warnings);
-    // A block with no location line reads as an empty location, which would
-    // wipe a guess already made — so guesses go straight back on here, where a
-    // save can see them, not after the next render.
-    const withGuesses = fillGuessedLocations(result.form);
-    setForm(withGuesses);
-    return withGuesses;
+    // What the box says is what you meant: a block with no location line has
+    // no location, so nothing written here is ever guessed at afterwards.
+    for (const id of ratingIdsOf(result.form)) dismissedRef.current.add(id);
+    setForm(result.form);
+    return result.form;
   }
 
   function handleModeChange(nextMode) {
@@ -1184,11 +1207,7 @@ export default function AddEditEntryModal({
         {autoLocationPref === 'on' && (
           <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <PlaceIcon sx={{ fontSize: '0.9rem' }} />
-            {autoLocation.here?.location
-              ? `A new restaurant with no location line gets the nearest branch, or where you are (${autoLocation.here.location}).`
-              : onDevice
-                ? 'A new restaurant with no location line gets its nearest branch, or where you are, once your location is known.'
-                : 'A block with no location line is saved without one. The location button in the form fills in where you are.'}
+            A block with no location line is saved without one. The location button in the form fills in where you are.
           </Typography>
         )}
         {textErrors.length > 0 && (

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   applyLinkedChange, buildLinkPlan, applyTextToForm, formToRatings, cloneEntryToForm, applyRatingCategory,
+  applyAutoLocations, ratingIdsOf, withoutGuessedLocations,
 } from './AddEditEntryModal';
 import { msToDateInput } from '../../utils/dateUtils';
 import { convertBetweenScales, roundToValidScore } from '../../utils/scaleUtils';
@@ -410,5 +411,71 @@ describe('applyRatingCategory (re-rating score guess)', () => {
   it('does not guess for a brand-new category with no scale yet', () => {
     const next = applyRatingCategory(formWithRerating(), 1, { ratingCategory: '', newCategoryName: 'Snack' }, map);
     expect(next.additionalRatings[0].score).toBe('8');
+  });
+});
+
+describe('text mode never fills in where you are', () => {
+  const categories = [{ uuid: 'c-greek', restaurantName: 'greek', ratingCategory: '' }];
+  const here = { location: 'Hampden, Denver', coordinates: '39.65432, -104.91234' };
+  const suggestFor = () => here;
+
+  /** What commitText does: apply the box, then mark every rating as written. */
+  function commit(form, text, lastAuto = new Map()) {
+    const lines = generateTextLines(formToRatings(withoutGuessedLocations(form, lastAuto)), categories);
+    const { form: next } = applyTextToForm(form, text, categories, lines);
+    return { form: next, dismissed: new Set(ratingIdsOf(next)) };
+  }
+
+  /** What the dialog does after: try to guess for everything new. */
+  function guessAfter({ form, dismissed }, lastAuto = new Map()) {
+    return applyAutoLocations(form, suggestFor, lastAuto, { dismissed }).form;
+  }
+
+  const locations = (form) => [form.location, ...form.additionalRatings.map((r) => r.location)];
+
+  it('leaves a pasted block with no location line without a location', () => {
+    const form = guessAfter(commit(makeForm([]), ['Zorbas', 'Gyro 8 greek'].join('\n')));
+    expect(form.restaurantName).toBe('Zorbas');
+    expect(form.location).toBe('');
+    expect(form.coordinates || '').toBe('');
+  });
+
+  it('leaves every one of several pasted restaurants without a location', () => {
+    const text = ['Zorbas', 'Gyro 8 greek', '', 'Izzio', 'Tart 9', '', 'In-N-Out', 'Fries 7'].join('\n');
+    const form = guessAfter(commit(makeForm([]), text));
+    expect(form.additionalRatings.length).toBeGreaterThanOrEqual(2);
+    expect(locations(form).every((l) => l === '')).toBe(true);
+  });
+
+  it('keeps a location line that was written', () => {
+    const text = ['Zorbas', 'Denver', 'Gyro 8 greek', '', 'Izzio', 'Tart 9'].join('\n');
+    const form = guessAfter(commit(makeForm([]), text));
+    expect(locations(form)).toEqual(['Denver', '']);
+  });
+
+  it('is the text-mode marking that stops the guess (without it, here would be filled in)', () => {
+    const { form } = commit(makeForm([]), ['Zorbas', 'Gyro 8 greek'].join('\n'));
+    expect(applyAutoLocations(form, suggestFor, new Map()).form.location).toBe('Hampden, Denver');
+  });
+
+  it("doesn't write a guessed location into the box", () => {
+    const guessed = applyAutoLocations(makeForm([]), suggestFor, new Map());
+    expect(guessed.form.location).toBe('Hampden, Denver');
+    const shown = generateTextLines(formToRatings(withoutGuessedLocations(guessed.form, guessed.lastAuto)), categories)
+      .map((l) => l.text).join('\n');
+    expect(shown).not.toContain('Hampden');
+  });
+
+  it('drops a guess once the box is edited, but keeps a location you typed', () => {
+    const guessed = applyAutoLocations(makeForm([]), suggestFor, new Map());
+    const lines = generateTextLines(formToRatings(withoutGuessedLocations(guessed.form, guessed.lastAuto)), categories);
+    const edited = lines.map((l) => l.text).join('\n').replace('Guess', 'Zorba');
+    const { form } = applyTextToForm(guessed.form, edited, categories, lines);
+    expect(form.location).toBe('');
+
+    const typed = { ...makeForm([]), location: 'Hampden, Denver' };
+    const shown = generateTextLines(formToRatings(withoutGuessedLocations(typed, new Map())), categories)
+      .map((l) => l.text).join('\n');
+    expect(shown).toContain('Hampden, Denver');
   });
 });
